@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MyCheating - Dating App with Supabase (PostgreSQL)
+MyCheating - Dating App with Supabase
 """
 
 from fastapi import FastAPI, Request, Form, WebSocket, WebSocketDisconnect
@@ -18,10 +18,11 @@ from psycopg2.extras import RealDictCursor
 
 # ============== CONFIG ==============
 BASE_DIR = Path(__file__).parent
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://postgres:LjkQuaJFolj7T004@db.xbetgvmqqadkthydwxyr.supabase.co:5432/postgres"
-)
+
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    raise Exception("DATABASE_URL non impostata! Controlla le Environment Variables su Render.")
+
 SECRET_KEY = os.environ.get("SECRET_KEY", "mycheating_secret_key_2026_super_sicura_123456")
 
 app = FastAPI(title="MyCheating")

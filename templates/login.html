@@ -1,43 +1,16 @@
-{% extends "base.html" %}
-{% block title %}Accedi - Spark{% endblock %}
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+    <title>Cheating</title>
+    <script type="module" crossorigin="" src="/assets/index-DWI8DAzA.js"></script>
+    <link rel="stylesheet" crossorigin="" href="/assets/index-DJ0sa0gz.css">
+  </head>
+  <body>
+    <div id="root"><div class="flex min-h-screen flex-col items-center justify-center bg-night px-5"><div class="absolute left-0 right-0 top-0 border-b border-line bg-night"><div class="mx-auto flex max-w-md items-center px-5 py-3"><a class="flex items-center gap-2" href="/" data-discover="true"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-flame text-primary"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"></path></svg><span class="font-display text-xl font-bold tracking-widest text-ink">MY CHEATING</span></a></div></div><div class="relative z-10 w-full max-w-sm pt-10"><div class="mb-6"><h1 class="font-display text-4xl font-bold text-ink">ACCEDI</h1><div class="mt-1 h-1 w-14 bg-hot rounded-full"></div><p class="mt-3 text-sm text-muted">Bentornato. Il tuo mondo ti aspetta.</p></div><div class="mb-4 space-y-2"></div><form class="space-y-3"><input required="" placeholder="Email" class="w-full rounded-xl border border-line bg-surface px-4 py-3 font-sans text-ink placeholder:text-muted outline-none transition focus:border-primary" type="email" value=""><input required="" minlength="8" placeholder="Password" class="w-full rounded-xl border border-line bg-surface px-4 py-3 font-sans text-ink placeholder:text-muted outline-none transition focus:border-primary" type="password" value=""><button type="submit" class="flex w-full items-center justify-center gap-2 rounded-xl bg-hot py-3.5 font-display font-semibold uppercase tracking-wider text-ink glow transition hover:opacity-90 disabled:opacity-50"> Entra</button></form><p class="mt-5 text-center text-sm text-muted">Prima volta qui? <button class="font-semibold text-primary hover:underline">Registrati gratis</button></p></div></div></div>
+  
 
-{% block content %}
-<div class="max-w-md mx-auto pt-8">
-    <div class="text-center mb-8">
-        <div class="text-4xl mb-3">💘</div>
-        <h1 class="text-2xl font-bold text-gray-900">Bentornato</h1>
-        <p class="text-gray-500 text-sm mt-1">Accedi al tuo account</p>
-    </div>
-
-    {% if error %}
-    <div class="bg-red-50 text-red-600 px-4 py-3 rounded-xl mb-5 text-sm font-medium">
-        {{ error }}
-    </div>
-    {% endif %}
-
-    <form method="post" action="/login" class="space-y-4">
-        <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1.5">Email</label>
-            <input type="email" name="email" required
-                   class="w-full border border-gray-200 rounded-xl px-4 py-3.5 bg-white focus:ring-2 focus:ring-spark-400 outline-none"
-                   placeholder="tua@email.com">
-        </div>
-        <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
-            <input type="password" name="password" required
-                   class="w-full border border-gray-200 rounded-xl px-4 py-3.5 bg-white focus:ring-2 focus:ring-spark-400 outline-none"
-                   placeholder="••••••••">
-        </div>
-
-        <button type="submit"
-                class="w-full btn-primary text-white font-semibold py-4 rounded-xl mt-2">
-            Accedi
-        </button>
-    </form>
-
-    <p class="text-center text-sm text-gray-500 mt-8">
-        Non hai un account?
-        <a href="/register" class="text-spark-500 font-semibold">Registrati</a>
-    </p>
-</div>
-{% endblock %}
+</body>

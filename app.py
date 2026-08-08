@@ -91,6 +91,12 @@ def eta(d):
     except Exception:
         return 0
 
+def require_admin(req):
+    user = current_user(req)
+    if not user or not user.get("is_admin"):
+        return None
+    return user
+
 @app.websocket("/ws/{uid}")
 async def ws_endpoint(websocket: WebSocket, uid: int):
     await manager.connect(uid, websocket)
@@ -393,3 +399,72 @@ async def notifications_page(req: Request):
     cur.close()
     c.close()
     return templates.TemplateResponse("notifications.html", {"request": req, "user": user, "notifications": [dict(n) for n in notifs]})
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_panel(req: Request):
+    user = require_admin(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    cur.execute("SELECT COUNT(*) as c FROM users")
+    users_count = cur.fetchone()["c"]
+    cur.execute("SELECT COUNT(*) as c FROM matches WHERE attivo=1")
+    matches_count = cur.fetchone()["c"]
+    cur.execute("SELECT COUNT(*) as c FROM messages")
+    messages_count = cur.fetchone()["c"]
+    cur.execute("SELECT COUNT(*) as c FROM users WHERE is_online=1")
+    online_count = cur.fetchone()["c"]
+    cur.execute("SELECT id, nome, username, email, stato, is_admin FROM users ORDER BY id DESC LIMIT 100")
+    users = cur.fetchall()
+    cur.execute("""SELECT m.data_match, u1.nome as nome1, u2.nome as nome2
+                   FROM matches m
+                   JOIN users u1 ON u1.id = m.user1_id
+                   JOIN users u2 ON u2.id = m.user2_id
+                   ORDER BY m.data_match DESC LIMIT 20""")
+    matches = cur.fetchall()
+    cur.close()
+    c.close()
+    return templates.TemplateResponse("admin.html", {
+        "request": req,
+        "user": user,
+        "stats": {"users": users_count, "matches": matches_count, "messages": messages_count, "online": online_count},
+        "users": [dict(u) for u in users],
+        "matches": [dict(m) for m in matches]
+    })
+
+@app.post("/admin/ban/{user_id}")
+async def admin_ban(req: Request, user_id: int):
+    if not require_admin(req):
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    cur.execute("UPDATE users SET stato='bannato', is_online=0 WHERE id=%s AND COALESCE(is_admin,0)=0", (user_id,))
+    c.commit()
+    cur.close()
+    c.close()
+    return RedirectResponse("/admin", 303)
+
+@app.post("/admin/unban/{user_id}")
+async def admin_unban(req: Request, user_id: int):
+    if not require_admin(req):
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    cur.execute("UPDATE users SET stato='attivo' WHERE id=%s", (user_id,))
+    c.commit()
+    cur.close()
+    c.close()
+    return RedirectResponse("/admin", 303)
+
+@app.post("/admin/delete/{user_id}")
+async def admin_delete(req: Request, user_id: int):
+    if not require_admin(req):
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    cur.execute("DELETE FROM users WHERE id=%s AND COALESCE(is_admin,0)=0", (user_id,))
+    c.commit()
+    cur.close()
+    c.close()
+    return RedirectResponse("/admin", 303)

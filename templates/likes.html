@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Likes – MyCheating</title>
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: #0a0a0a; font-family: 'Oswald', sans-serif; }
+        .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
+        .text-red-pure { color: #ff1a1a; }
+    </style>
+</head>
+<body class="text-white min-h-screen pb-28">
+
+    <div class="sticky top-0 z-20 bg-[#0a0a0a]/95 backdrop-blur border-b border-white/10 px-4 py-3 flex items-center justify-between">
+        <div class="font-hot text-xl tracking-wider flex items-center gap-1.5">
+            <span class="text-red-pure">⭐</span> CHI TI PIACE
+        </div>
+        <span class="text-sm text-gray-500">{{ likes|length }} like</span>
+    </div>
+
+    <div class="max-w-md mx-auto px-4 py-5">
+        <p class="text-gray-500 text-sm mb-5">Persone che ti hanno messo like. Ricambia per fare match!</p>
+
+        {% if likes %}
+        <div class="grid grid-cols-2 gap-3">
+            {% for l in likes %}
+            <div class="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+                <div class="h-36 bg-gradient-to-br from-red-800 to-black flex items-center justify-center relative">
+                    <span class="font-hot text-5xl">{{ l.nome[0] | upper }}</span>
+                    {% if l.is_online %}
+                    <span class="absolute top-2 right-2 w-2.5 h-2.5 bg-green-400 rounded-full"></span>
+                    {% endif %}
+                </div>
+                <div class="p-3">
+                    <div class="font-hot text-lg">{{ l.nome }}, {{ l.eta }}</div>
+                    {% if l.distance_km is not none %}
+                    <div class="text-xs text-gray-500 mb-2">📍 {{ l.distance_km }} km</div>
+                    {% else %}
+                    <div class="text-xs text-gray-500 mb-2">{{ l.citta or '—' }}</div>
+                    {% endif %}
+                    <div class="flex gap-2">
+                        <form method="post" action="/swipe" class="flex-1">
+                            <input type="hidden" name="to_user_id" value="{{ l.id }}">
+                            <input type="hidden" name="tipo" value="like">
+                            <button class="w-full py-2 rounded-lg bg-[#22c55e] text-white text-sm font-semibold">♥ Like</button>
+                        </form>
+                        <form method="post" action="/swipe">
+                            <input type="hidden" name="to_user_id" value="{{ l.id }}">
+                            <input type="hidden" name="tipo" value="dislike">
+                            <button class="w-10 h-9 rounded-lg bg-white/10 text-sm">✕</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-20">
+            <div class="text-5xl mb-3">⭐</div>
+            <h2 class="font-hot text-2xl mb-2">Nessun like ancora</h2>
+            <p class="text-gray-500 mb-6">Continua a fare swipe, arriveranno!</p>
+            <a href="/discover" class="inline-block bg-[#ff1a1a] px-8 py-3 rounded-xl font-semibold">Scopri profili</a>
+        </div>
+        {% endif %}
+    </div>
+
+    <nav class="fixed bottom-0 left-0 right-0 bg-[#0a0a0a]/95 backdrop-blur border-t border-white/10 z-20">
+        <div class="max-w-md mx-auto grid grid-cols-5 h-[72px] text-[10px]">
+            <a href="/discover" class="flex flex-col items-center justify-center text-gray-500 gap-0.5">
+                <span class="text-xl">🔥</span> Scopri
+            </a>
+            <a href="/likes" class="flex flex-col items-center justify-center text-red-pure gap-0.5">
+                <span class="text-xl">⭐</span> Likes
+            </a>
+            <a href="/matches" class="flex flex-col items-center justify-center text-gray-500 gap-0.5">
+                <span class="text-xl">💬</span> Chat
+            </a>
+            <a href="/matches" class="flex flex-col items-center justify-center text-gray-500 gap-0.5">
+                <span class="text-xl">♥</span> Match
+            </a>
+            <a href="/profile" class="flex flex-col items-center justify-center text-gray-500 gap-0.5">
+                <span class="text-xl">👤</span> Tu
+            </a>
+        </div>
+    </nav>
+</body>
+</html>

@@ -3,105 +3,115 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Match – MyCheating</title>
+    <title>Chat & Match – MyCheating</title>
     <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { background-color: #0a0a0a; font-family: 'Oswald', sans-serif; }
+        body { background: #0a0a0a; font-family: 'Oswald', sans-serif; }
         .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
         .text-red-pure { color: #ff1a1a; }
     </style>
 </head>
-<body class="text-white min-h-screen pb-24">
+<body class="text-white min-h-screen pb-28">
 
-    <div class="flex items-center justify-between px-5 py-4 border-b border-white/10">
-        <div class="font-hot text-xl tracking-wider flex items-center gap-2">
-            <span class="text-red-pure">🔥</span> MY CHEATING
+    <div class="sticky top-0 z-20 bg-[#0a0a0a]/95 backdrop-blur border-b border-white/10 px-4 py-3 flex items-center justify-between">
+        <div class="font-hot text-xl tracking-wider flex items-center gap-1.5">
+            <span class="text-red-pure">🔥</span> CHAT
         </div>
-        <span class="text-sm text-gray-400">{{ matches|length }} match</span>
+        <a href="/notifications" class="relative w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
+            🔔
+            {% if unread and unread > 0 %}
+            <span class="absolute -top-1 -right-1 min-w-[16px] h-4 bg-[#ff1a1a] text-[9px] font-bold rounded-full flex items-center justify-center px-1">{{ unread if unread < 10 else '9+' }}</span>
+            {% endif %}
+        </a>
     </div>
 
-    <div class="max-w-md mx-auto px-4 py-6">
-        <h1 class="font-hot text-3xl tracking-wide mb-6">I TUOI MATCH</h1>
-
+    <div class="max-w-md mx-auto px-4 py-5">
         {% if new_match %}
-        <div class="bg-[#ff1a1a]/20 border border-[#ff1a1a]/40 text-[#ff1a1a] text-center py-3 rounded-xl mb-6 font-medium">
-            🎉 Nuovo Match!
+        <div class="mb-5 bg-gradient-to-r from-[#ff1a1a]/30 to-orange-500/20 border border-[#ff1a1a]/40 rounded-2xl p-4 text-center">
+            <div class="text-3xl mb-1">🎉</div>
+            <div class="font-hot text-xl text-red-pure">IT'S A MATCH!</div>
+            <p class="text-sm text-gray-300 mt-1">Inizia a chattare subito</p>
         </div>
         {% endif %}
 
+        <!-- Tabs -->
+        <div class="flex gap-2 mb-5">
+            <button class="flex-1 py-2.5 rounded-xl bg-[#ff1a1a] text-white text-sm font-semibold">Conversazioni</button>
+            <a href="/likes" class="flex-1 py-2.5 rounded-xl bg-white/5 border border-white/10 text-gray-400 text-sm text-center">Likes ricevuti</a>
+        </div>
+
         {% if matches %}
-        <div class="space-y-3">
+        <div class="space-y-2">
             {% for m in matches %}
-            <a href="/chat/{{ m.conversation_id }}" class="flex items-center gap-4 bg-white/5 border border-white/10 p-4 rounded-2xl hover:border-[#ff1a1a]/40 transition">
-                <div class="relative">
-                    <div class="w-14 h-14 rounded-full bg-gradient-to-br from-red-700 to-black flex items-center justify-center text-white text-xl font-hot">
+            <a href="/chat/{{ m.conversation_id }}" class="flex items-center gap-3 p-3 rounded-2xl bg-white/5 border border-white/10 hover:border-[#ff1a1a]/50 transition group">
+                <div class="relative shrink-0">
+                    <div class="w-14 h-14 rounded-full bg-gradient-to-br from-red-600 to-black flex items-center justify-center font-hot text-xl">
                         {{ m.nome[0] | upper }}
                     </div>
                     {% if m.is_online %}
-                    <span class="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-[#0a0a0a] rounded-full"></span>
+                    <span class="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-400 border-2 border-[#0a0a0a] rounded-full"></span>
                     {% endif %}
                 </div>
                 <div class="flex-1 min-w-0">
-                    <div class="font-hot text-lg tracking-wide">{{ m.nome }} <span class="text-gray-500 text-base">{{ m.eta }}</span></div>
-                    <p class="text-sm text-gray-500">
-                        {% if m.distance_km is not none %}📍 {{ m.distance_km }} km · {% endif %}Tocca per chattare
-                    </p>
+                    <div class="flex items-center justify-between">
+                        <span class="font-hot text-lg tracking-wide truncate">{{ m.nome }}</span>
+                        {% if m.distance_km is not none %}
+                        <span class="text-[10px] text-gray-500 shrink-0 ml-2">{{ m.distance_km }} km</span>
+                        {% endif %}
+                    </div>
+                    <p class="text-sm text-gray-500 truncate">{{ m.eta }} anni · Tocca per scrivere</p>
                 </div>
-                <div class="text-[#ff1a1a] text-xl">💬</div>
+                <div class="text-[#ff1a1a] opacity-60 group-hover:opacity-100 text-lg">→</div>
             </a>
             {% endfor %}
         </div>
         {% else %}
         <div class="text-center py-20">
-            <div class="text-5xl mb-4">💔</div>
-            <h2 class="font-hot text-2xl mb-2">Nessun match</h2>
-            <p class="text-gray-500 mb-6">Inizia a fare swipe!</p>
-            <a href="/discover" class="inline-block bg-[#ff1a1a] text-white font-semibold px-8 py-3 rounded-xl">Vai a Scopri</a>
+            <div class="text-5xl mb-3">💬</div>
+            <h2 class="font-hot text-2xl mb-2">Nessuna chat</h2>
+            <p class="text-gray-500 mb-6">Fai match per iniziare a parlare</p>
+            <a href="/discover" class="inline-block bg-[#ff1a1a] px-8 py-3 rounded-xl font-semibold">Vai a Scopri</a>
         </div>
         {% endif %}
     </div>
 
-    <nav class="fixed bottom-0 left-0 right-0 bg-[#0a0a0a] border-t border-white/10">
-        <div class="max-w-md mx-auto grid grid-cols-4 h-16 text-xs">
-            <a href="/discover" class="flex flex-col items-center justify-center text-gray-500">
-                <span class="text-lg">🔥</span> Scopri
+    <nav class="fixed bottom-0 left-0 right-0 bg-[#0a0a0a]/95 backdrop-blur border-t border-white/10 z-20">
+        <div class="max-w-md mx-auto grid grid-cols-5 h-[72px] text-[10px]">
+            <a href="/discover" class="flex flex-col items-center justify-center text-gray-500 gap-0.5">
+                <span class="text-xl">🔥</span> Scopri
             </a>
-            <a href="/matches" class="flex flex-col items-center justify-center text-red-pure">
-                <span class="text-lg">♥</span> Match
+            <a href="/likes" class="flex flex-col items-center justify-center text-gray-500 gap-0.5">
+                <span class="text-xl">⭐</span> Likes
             </a>
-            <a href="/notifications" class="flex flex-col items-center justify-center text-gray-500 relative">
-                <span class="text-lg relative">
-                    💬
-                    {% if unread and unread > 0 %}
-                    <span class="absolute -top-2 -right-3 min-w-[18px] h-[18px] bg-[#ff1a1a] text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1">{{ unread if unread < 10 else '9+' }}</span>
-                    {% endif %}
-                </span>
-                Chat
+            <a href="/matches" class="flex flex-col items-center justify-center text-red-pure gap-0.5">
+                <span class="text-xl">💬</span> Chat
             </a>
-            <a href="/profile" class="flex flex-col items-center justify-center text-gray-500">
-                <span class="text-lg">👤</span> Profilo
+            <a href="/matches" class="flex flex-col items-center justify-center text-gray-500 gap-0.5">
+                <span class="text-xl">♥</span> Match
+            </a>
+            <a href="/profile" class="flex flex-col items-center justify-center text-gray-500 gap-0.5">
+                <span class="text-xl">👤</span> Tu
             </a>
         </div>
     </nav>
 
     <script>
-    (function() {
+    (function(){
         const userId = {{ user.id if user else 'null' }};
         if (!userId) return;
-        let ws;
         function connect() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(`${protocol}//${window.location.host}/ws/${userId}`);
-            ws.onmessage = function(event) {
-                const data = JSON.parse(event.data);
-                const toast = document.createElement('div');
-                toast.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#ff1a1a;color:white;padding:14px 24px;border-radius:12px;z-index:9999;text-align:center;max-width:90%;font-family:Oswald,sans-serif;';
-                toast.innerHTML = `<strong>${data.title || 'Notifica'}</strong><br><span style="font-size:13px">${data.message || ''}</span>`;
-                document.body.appendChild(toast);
-                setTimeout(() => { toast.style.opacity='0'; setTimeout(() => toast.remove(), 400); }, 4000);
+            const p = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const ws = new WebSocket(`${p}//${location.host}/ws/${userId}`);
+            ws.onmessage = (e) => {
+                const d = JSON.parse(e.data);
+                const t = document.createElement('div');
+                t.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);background:#ff1a1a;color:#fff;padding:12px 20px;border-radius:12px;z-index:99;font-family:Oswald,sans-serif;text-align:center;max-width:90%';
+                t.innerHTML = `<b>${d.title||'Notifica'}</b><br><span style="font-size:12px">${d.message||''}</span>`;
+                document.body.appendChild(t);
+                setTimeout(()=>{t.style.opacity='0';setTimeout(()=>t.remove(),300)},3500);
             };
-            ws.onclose = function() { setTimeout(connect, 3000); };
+            ws.onclose = () => setTimeout(connect, 3000);
         }
         connect();
     })();

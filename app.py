@@ -104,6 +104,28 @@ def unread_count(user_id):
     except Exception:
         return 0
 
+def likes_received_count(user_id):
+    try:
+        c = db()
+        cur = c.cursor()
+        cur.execute("""
+            SELECT COUNT(*) as c FROM swipes s
+            WHERE s.to_user_id = %s
+              AND s.tipo IN ('like', 'superlike')
+              AND s.from_user_id NOT IN (
+                  SELECT CASE WHEN m.user1_id = %s THEN m.user2_id ELSE m.user1_id END
+                  FROM matches m WHERE (m.user1_id = %s OR m.user2_id = %s) AND m.attivo = 1
+              )
+              AND s.from_user_id NOT IN (SELECT to_user_id FROM swipes WHERE from_user_id = %s)
+        """, (user_id, user_id, user_id, user_id, user_id))
+        n = cur.fetchone()["c"]
+        cur.close()
+        c.close()
+        return n
+    except Exception as e:
+        print("likes_received_count error:", e)
+        return 0
+
 def haversine_km(lat1, lon1, lat2, lon2):
     if None in (lat1, lon1, lat2, lon2):
         return None
@@ -235,6 +257,8 @@ async def discover(req: Request):
     if not user:
         return RedirectResponse("/login", 303)
 
+    only_online = req.query_params.get("online") == "1"
+
     # max distance from preferences
     distanza_max = 50
     try:
@@ -290,22 +314,26 @@ async def discover(req: Request):
 
         # fallback: users without GPS if no nearby found
         if not cand:
-            cur.execute("""
+            online_sql = " AND u.is_online = 1" if only_online else ""
+            cur.execute(f"""
                 SELECT u.* FROM users u
                 WHERE u.id != %s AND u.stato = 'attivo'
                   AND u.id NOT IN (SELECT to_user_id FROM swipes WHERE from_user_id = %s)
                   AND u.id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = %s)
                   AND u.id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = %s)
+                  {online_sql}
                 ORDER BY RANDOM() LIMIT 1
             """, (user["id"], user["id"], user["id"], user["id"]))
             cand = cur.fetchone()
     else:
-        cur.execute("""
+        online_sql = " AND u.is_online = 1" if only_online else ""
+        cur.execute(f"""
             SELECT u.* FROM users u
             WHERE u.id != %s AND u.stato = 'attivo'
               AND u.id NOT IN (SELECT to_user_id FROM swipes WHERE from_user_id = %s)
               AND u.id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = %s)
               AND u.id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = %s)
+              {online_sql}
             ORDER BY RANDOM() LIMIT 1
         """, (user["id"], user["id"], user["id"], user["id"]))
         cand = cur.fetchone()
@@ -335,8 +363,10 @@ async def discover(req: Request):
         "user": user,
         "candidate": candidate,
         "unread": unread_count(user["id"]),
+        "likes_count": likes_received_count(user["id"]),
         "has_gps": has_gps,
         "distanza_max": distanza_max,
+        "only_online": only_online,
     })
 
 @app.post("/swipe")
@@ -555,6 +585,78 @@ async def notifications_page(req: Request):
     return templates.TemplateResponse("notifications.html", {
         "request": req, "user": user, "notifications": [dict(n) for n in notifs], "unread": 0
     })
+
+
+
+@app.get("/likes", response_class=HTMLResponse)
+async def likes_page(req: Request):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    cur.execute("""
+        SELECT u.* FROM swipes s
+        JOIN users u ON u.id = s.from_user_id
+        WHERE s.to_user_id = %s
+          AND s.tipo IN ('like', 'superlike')
+          AND u.stato = 'attivo'
+          AND s.from_user_id NOT IN (
+              SELECT CASE WHEN m.user1_id = %s THEN m.user2_id ELSE m.user1_id END
+              FROM matches m WHERE (m.user1_id = %s OR m.user2_id = %s) AND m.attivo = 1
+          )
+          AND s.from_user_id NOT IN (SELECT to_user_id FROM swipes WHERE from_user_id = %s)
+        ORDER BY s.created_at DESC
+        LIMIT 50
+    """, (user["id"], user["id"], user["id"], user["id"], user["id"]))
+    rows = cur.fetchall()
+    my_lat, my_lng = user.get("latitude"), user.get("longitude")
+    likes = []
+    for r in rows:
+        d = dict(r)
+        d["eta"] = eta(d.get("data_nascita"))
+        if my_lat and my_lng and d.get("latitude") and d.get("longitude"):
+            dist = haversine_km(my_lat, my_lng, d["latitude"], d["longitude"])
+            d["distance_km"] = round(dist, 1) if dist is not None else None
+        else:
+            d["distance_km"] = None
+        likes.append(d)
+    cur.close()
+    c.close()
+    return templates.TemplateResponse("likes.html", {
+        "request": req, "user": user, "likes": likes,
+        "unread": unread_count(user["id"]),
+        "likes_count": len(likes),
+    })
+
+
+@app.post("/block/{user_id}")
+async def block_user(req: Request, user_id: int):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    if user_id == user["id"]:
+        return RedirectResponse("/discover", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute(
+            "INSERT INTO blocks (blocker_id, blocked_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (user["id"], user_id),
+        )
+        # also dislike so they don't show again
+        cur.execute(
+            "INSERT INTO swipes (from_user_id, to_user_id, tipo) VALUES (%s, %s, 'dislike') ON CONFLICT DO NOTHING",
+            (user["id"], user_id),
+        )
+        c.commit()
+    except Exception as e:
+        c.rollback()
+        print("block error:", e)
+    finally:
+        cur.close()
+        c.close()
+    return RedirectResponse("/discover", 303)
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_panel(req: Request):

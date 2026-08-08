@@ -1,105 +1,104 @@
-{% extends "base.html" %}
-{% block title %}Scopri - Spark{% endblock %}
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scopri – MyCheating</title>
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0a0a0a; font-family: 'Oswald', sans-serif; }
+        .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
+        .btn-red { background: #ff1a1a; }
+        .btn-like { background: #22c55e; }
+        .btn-dislike { background: #ff1a1a; }
+        .text-red-pure { color: #ff1a1a; }
+    </style>
+</head>
+<body class="text-white min-h-screen pb-24">
 
-{% block content %}
-{% if candidate %}
-<div class="bg-white rounded-3xl card-shadow overflow-hidden">
-    <!-- Foto / Avatar -->
-    <div class="relative h-80 bg-gradient-to-br from-spark-400 via-rose-400 to-orange-400 flex items-center justify-center">
-        {% if candidate.foto_principale_url %}
-            <img src="{{ candidate.foto_principale_url }}" alt="Foto" class="w-full h-full object-cover">
-        {% else %}
-            <div class="text-white text-8xl font-bold opacity-90 select-none">
-                {{ candidate.nome[0] | upper }}
+    <!-- Top bar -->
+    <div class="flex items-center justify-between px-5 py-4 border-b border-white/10">
+        <div class="font-hot text-xl tracking-wider flex items-center gap-2">
+            <span class="text-red-pure">🔥</span> MY CHEATING
+        </div>
+        <a href="/profile" class="text-sm text-gray-400">Profilo</a>
+    </div>
+
+    <div class="max-w-md mx-auto px-4 py-8">
+        {% if candidate %}
+        <div class="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+            <!-- Avatar -->
+            <div class="h-80 bg-gradient-to-br from-red-900/40 to-black flex items-center justify-center relative">
+                <div class="text-white text-8xl font-hot opacity-90">
+                    {{ candidate.nome[0] | upper }}
+                </div>
+                {% if candidate.is_online %}
+                <div class="absolute top-4 right-4 bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-full">
+                    ONLINE
+                </div>
+                {% endif %}
             </div>
-        {% endif %}
 
-        <!-- Badge online -->
-        {% if candidate.is_online %}
-        <div class="absolute top-4 right-4 bg-black/40 backdrop-blur-sm text-white text-xs font-medium px-3 py-1 rounded-full flex items-center gap-1.5">
-            <span class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
-            Online
+            <div class="p-6">
+                <div class="flex items-baseline gap-2 mb-1">
+                    <h2 class="font-hot text-3xl tracking-wide">{{ candidate.nome }}</h2>
+                    <span class="text-gray-400 text-xl">{{ candidate.eta }}</span>
+                </div>
+                {% if candidate.citta %}
+                <p class="text-gray-500 text-sm mb-4">📍 {{ candidate.citta }}</p>
+                {% endif %}
+                {% if candidate.bio %}
+                <p class="text-gray-300 mb-5 leading-relaxed">{{ candidate.bio }}</p>
+                {% endif %}
+                {% if candidate.interessi %}
+                <div class="flex flex-wrap gap-2 mb-6">
+                    {% for i in candidate.interessi %}
+                    <span class="bg-red-500/20 text-red-pure text-xs font-medium px-3 py-1 rounded-full">{{ i }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Pulsanti -->
+            <div class="flex justify-center gap-6 pb-8">
+                <form method="post" action="/swipe">
+                    <input type="hidden" name="to_user_id" value="{{ candidate.id }}">
+                    <input type="hidden" name="tipo" value="dislike">
+                    <button class="w-16 h-16 rounded-full btn-dislike text-white text-2xl flex items-center justify-center">✕</button>
+                </form>
+                <form method="post" action="/swipe">
+                    <input type="hidden" name="to_user_id" value="{{ candidate.id }}">
+                    <input type="hidden" name="tipo" value="like">
+                    <button class="w-16 h-16 rounded-full btn-like text-white text-2xl flex items-center justify-center">♥</button>
+                </form>
+            </div>
+        </div>
+        {% else %}
+        <div class="text-center py-20">
+            <div class="text-5xl mb-4">🔍</div>
+            <h2 class="font-hot text-2xl mb-2">Nessun profilo</h2>
+            <p class="text-gray-500">Torna più tardi</p>
         </div>
         {% endif %}
     </div>
 
-    <div class="p-6">
-        <div class="flex items-baseline gap-2 mb-1">
-            <h2 class="text-2xl font-bold text-gray-900">{{ candidate.nome }}</h2>
-            <span class="text-xl text-gray-400 font-medium">{{ candidate.eta }}</span>
+    <!-- Bottom nav -->
+    <nav class="fixed bottom-0 left-0 right-0 bg-[#0a0a0a] border-t border-white/10">
+        <div class="max-w-md mx-auto grid grid-cols-4 h-16 text-xs">
+            <a href="/discover" class="flex flex-col items-center justify-center text-red-pure">
+                <span class="text-lg">🔥</span> Scopri
+            </a>
+            <a href="/matches" class="flex flex-col items-center justify-center text-gray-500">
+                <span class="text-lg">♥</span> Match
+            </a>
+            <a href="/notifications" class="flex flex-col items-center justify-center text-gray-500">
+                <span class="text-lg">💬</span> Chat
+            </a>
+            <a href="/profile" class="flex flex-col items-center justify-center text-gray-500">
+                <span class="text-lg">👤</span> Profilo
+            </a>
         </div>
-
-        {% if candidate.citta %}
-        <p class="text-gray-500 text-sm mb-4 flex items-center gap-1">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-            {{ candidate.citta }}
-        </p>
-        {% endif %}
-
-        {% if candidate.bio %}
-        <p class="text-gray-700 leading-relaxed mb-5">{{ candidate.bio }}</p>
-        {% endif %}
-
-        {% if candidate.interessi %}
-        <div class="flex flex-wrap gap-2 mb-5">
-            {% for i in candidate.interessi %}
-            <span class="bg-spark-50 text-spark-600 text-xs font-semibold px-3.5 py-1.5 rounded-full">{{ i }}</span>
-            {% endfor %}
-        </div>
-        {% endif %}
-
-        <div class="flex flex-wrap gap-3 text-sm text-gray-500">
-            {% if candidate.cerca %}
-            <span class="bg-gray-100 px-3 py-1 rounded-full">🎯 {{ candidate.cerca }}</span>
-            {% endif %}
-            {% if candidate.altezza %}
-            <span class="bg-gray-100 px-3 py-1 rounded-full">{{ candidate.altezza }} cm</span>
-            {% endif %}
-        </div>
-    </div>
-
-    <!-- Pulsanti azione -->
-    <div class="flex justify-center items-center gap-5 pb-8 px-6">
-        <!-- Dislike -->
-        <form method="post" action="/swipe">
-            <input type="hidden" name="to_user_id" value="{{ candidate.id }}">
-            <input type="hidden" name="tipo" value="dislike">
-            <button type="submit"
-                    class="w-[68px] h-[68px] rounded-full btn-dislike text-white text-2xl shadow-lg shadow-red-200 active:scale-90 transition flex items-center justify-center">
-                ✕
-            </button>
-        </form>
-
-        <!-- Superlike -->
-        <form method="post" action="/swipe">
-            <input type="hidden" name="to_user_id" value="{{ candidate.id }}">
-            <input type="hidden" name="tipo" value="superlike">
-            <button type="submit"
-                    class="w-14 h-14 rounded-full btn-super text-white text-xl shadow-lg shadow-blue-200 active:scale-90 transition flex items-center justify-center">
-                ★
-            </button>
-        </form>
-
-        <!-- Like -->
-        <form method="post" action="/swipe">
-            <input type="hidden" name="to_user_id" value="{{ candidate.id }}">
-            <input type="hidden" name="tipo" value="like">
-            <button type="submit"
-                    class="w-[68px] h-[68px] rounded-full btn-like text-white text-2xl shadow-lg shadow-green-200 active:scale-90 transition flex items-center justify-center">
-                ♥
-            </button>
-        </form>
-    </div>
-</div>
-{% else %}
-<div class="text-center py-24">
-    <div class="w-24 h-24 mx-auto mb-6 rounded-full bg-gray-100 flex items-center justify-center text-4xl">
-        🔍
-    </div>
-    <h2 class="text-xl font-bold text-gray-800 mb-2">Nessun profilo disponibile</h2>
-    <p class="text-gray-500 max-w-xs mx-auto">
-        Hai già visto tutti gli utenti nelle vicinanze. Torna più tardi!
-    </p>
-</div>
-{% endif %}
-{% endblock %}
+    </nav>
+</body>
+</html>

@@ -58,7 +58,6 @@
     <script>
         const messages = document.getElementById('messages');
         if (messages) messages.scrollTop = messages.scrollHeight;
-
         (function() {
             const userId = {{ user.id if user else 'null' }};
             if (!userId) return;

@@ -13,7 +13,6 @@
     </style>
 </head>
 <body class="text-white min-h-screen">
-
     <div class="flex items-center justify-between px-5 py-4 border-b border-white/10">
         <div class="font-hot text-xl tracking-wider flex items-center gap-2">
             <span class="text-red-pure">🔥</span> ADMIN PANEL
@@ -23,10 +22,7 @@
             <a href="/logout" class="text-red-pure">Esci</a>
         </div>
     </div>
-
     <div class="max-w-5xl mx-auto px-4 py-8">
-
-        <!-- Stats -->
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
             <div class="bg-white/5 border border-white/10 rounded-xl p-5 text-center">
                 <div class="text-3xl font-hot text-red-pure">{{ stats.users }}</div>
@@ -45,8 +41,6 @@
                 <div class="text-xs text-gray-500 tracking-widest mt-1">ONLINE</div>
             </div>
         </div>
-
-        <!-- Users -->
         <h2 class="font-hot text-2xl tracking-wide mb-4">UTENTI</h2>
         <div class="bg-white/5 border border-white/10 rounded-xl overflow-hidden mb-10">
             <div class="overflow-x-auto">
@@ -81,16 +75,16 @@
                                 <div class="flex gap-2">
                                     {% if u.stato == 'attivo' %}
                                     <form method="post" action="/admin/ban/{{ u.id }}">
-                                        <button class="text-xs bg-red-500/20 text-red-pure px-3 py-1 rounded hover:bg-red-500/40">Banna</button>
+                                        <button class="text-xs bg-red-500/20 text-red-pure px-3 py-1 rounded">Banna</button>
                                     </form>
                                     {% else %}
                                     <form method="post" action="/admin/unban/{{ u.id }}">
-                                        <button class="text-xs bg-green-500/20 text-green-400 px-3 py-1 rounded hover:bg-green-500/40">Riattiva</button>
+                                        <button class="text-xs bg-green-500/20 text-green-400 px-3 py-1 rounded">Riattiva</button>
                                     </form>
                                     {% endif %}
                                     {% if not u.is_admin %}
-                                    <form method="post" action="/admin/delete/{{ u.id }}" onsubmit="return confirm('Eliminare questo utente?')">
-                                        <button class="text-xs bg-white/10 text-gray-400 px-3 py-1 rounded hover:bg-white/20">Elimina</button>
+                                    <form method="post" action="/admin/delete/{{ u.id }}" onsubmit="return confirm('Eliminare?')">
+                                        <button class="text-xs bg-white/10 text-gray-400 px-3 py-1 rounded">Elimina</button>
                                     </form>
                                     {% endif %}
                                 </div>
@@ -101,10 +95,8 @@
                 </table>
             </div>
         </div>
-
-        <!-- Recent matches -->
         <h2 class="font-hot text-2xl tracking-wide mb-4">ULTIMI MATCH</h2>
-        <div class="bg-white/5 border border-white/10 rounded-xl p-4 space-y-2 mb-10">
+        <div class="bg-white/5 border border-white/10 rounded-xl p-4 space-y-2">
             {% for m in matches %}
             <div class="flex justify-between items-center py-2 border-b border-white/5 text-sm">
                 <span>{{ m.nome1 }} ↔ {{ m.nome2 }}</span>
@@ -114,7 +106,6 @@
             <p class="text-gray-500 text-sm">Nessun match</p>
             {% endfor %}
         </div>
-
     </div>
 </body>
 </html>

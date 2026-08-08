@@ -91,6 +91,18 @@ def eta(d):
     except Exception:
         return 0
 
+def unread_count(user_id):
+    try:
+        c = db()
+        cur = c.cursor()
+        cur.execute("SELECT COUNT(*) as c FROM notifications WHERE user_id=%s AND letto=0", (user_id,))
+        n = cur.fetchone()["c"]
+        cur.close()
+        c.close()
+        return n
+    except Exception:
+        return 0
+
 def require_admin(req):
     user = current_user(req)
     if not user or not user.get("is_admin"):
@@ -206,7 +218,9 @@ async def discover(req: Request):
             pass
     cur.close()
     c.close()
-    return templates.TemplateResponse("discover.html", {"request": req, "user": user, "candidate": candidate})
+    return templates.TemplateResponse("discover.html", {
+        "request": req, "user": user, "candidate": candidate, "unread": unread_count(user["id"])
+    })
 
 @app.post("/swipe")
 async def swipe(req: Request, to_user_id: int = Form(...), tipo: str = Form(...)):
@@ -275,7 +289,9 @@ async def matches_page(req: Request):
     new_match = req.query_params.get("new_match")
     cur.close()
     c.close()
-    return templates.TemplateResponse("matches.html", {"request": req, "user": user, "matches": match_list, "new_match": new_match})
+    return templates.TemplateResponse("matches.html", {
+        "request": req, "user": user, "matches": match_list, "new_match": new_match, "unread": unread_count(user["id"])
+    })
 
 @app.get("/chat/{conversation_id}", response_class=HTMLResponse)
 async def chat_page(req: Request, conversation_id: int):
@@ -302,7 +318,10 @@ async def chat_page(req: Request, conversation_id: int):
     c.commit()
     cur.close()
     c.close()
-    return templates.TemplateResponse("chat.html", {"request": req, "user": user, "altro": altro, "conversation_id": conversation_id, "messaggi": [dict(m) for m in messaggi]})
+    return templates.TemplateResponse("chat.html", {
+        "request": req, "user": user, "altro": altro, "conversation_id": conversation_id,
+        "messaggi": [dict(m) for m in messaggi], "unread": unread_count(user["id"])
+    })
 
 @app.post("/chat/{conversation_id}/send")
 async def send_message(req: Request, conversation_id: int, contenuto: str = Form(...)):
@@ -350,7 +369,12 @@ async def profile_page(req: Request):
         c.close()
     except Exception:
         pass
-    return templates.TemplateResponse("profile.html", {"request": req, "user": user, "interessi": interessi, "all_interests": [dict(i) for i in all_interests], "prefs": dict(prefs) if prefs else {}})
+    return templates.TemplateResponse("profile.html", {
+        "request": req, "user": user, "interessi": interessi,
+        "all_interests": [dict(i) for i in all_interests],
+        "prefs": dict(prefs) if prefs else {},
+        "unread": unread_count(user["id"])
+    })
 
 @app.post("/profile/update")
 async def update_profile(req: Request, bio: str = Form(""), citta: str = Form(""), altezza: Optional[int] = Form(None), fuma: str = Form(""), beve: str = Form(""), cerca: str = Form("")):
@@ -398,7 +422,9 @@ async def notifications_page(req: Request):
     c.commit()
     cur.close()
     c.close()
-    return templates.TemplateResponse("notifications.html", {"request": req, "user": user, "notifications": [dict(n) for n in notifs]})
+    return templates.TemplateResponse("notifications.html", {
+        "request": req, "user": user, "notifications": [dict(n) for n in notifs], "unread": 0
+    })
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_panel(req: Request):
@@ -426,8 +452,7 @@ async def admin_panel(req: Request):
     cur.close()
     c.close()
     return templates.TemplateResponse("admin.html", {
-        "request": req,
-        "user": user,
+        "request": req, "user": user,
         "stats": {"users": users_count, "matches": matches_count, "messages": messages_count, "online": online_count},
         "users": [dict(u) for u in users],
         "matches": [dict(m) for m in matches]

@@ -49,17 +49,17 @@
                 <form method="post" action="/swipe">
                     <input type="hidden" name="to_user_id" value="{{ candidate.id }}">
                     <input type="hidden" name="tipo" value="dislike">
-                    <button class="w-16 h-16 rounded-full bg-[#ff1a1a] text-white text-2xl flex items-center justify-center">✕</button>
+                    <button class="w-16 h-16 rounded-full bg-[#ff1a1a] text-white text-2xl flex items-center justify-center shadow-lg shadow-red-900/40">✕</button>
                 </form>
                 <form method="post" action="/swipe">
                     <input type="hidden" name="to_user_id" value="{{ candidate.id }}">
                     <input type="hidden" name="tipo" value="superlike">
-                    <button class="w-14 h-14 rounded-full bg-orange-500 text-white text-xl flex items-center justify-center">🔥</button>
+                    <button class="w-14 h-14 rounded-full bg-orange-500 text-white text-xl flex items-center justify-center shadow-lg shadow-orange-900/40">🔥</button>
                 </form>
                 <form method="post" action="/swipe">
                     <input type="hidden" name="to_user_id" value="{{ candidate.id }}">
                     <input type="hidden" name="tipo" value="like">
-                    <button class="w-16 h-16 rounded-full bg-[#22c55e] text-white text-2xl flex items-center justify-center">♥</button>
+                    <button class="w-16 h-16 rounded-full bg-[#22c55e] text-white text-2xl flex items-center justify-center shadow-lg shadow-green-900/40">♥</button>
                 </form>
             </div>
         </div>
@@ -74,10 +74,24 @@
 
     <nav class="fixed bottom-0 left-0 right-0 bg-[#0a0a0a] border-t border-white/10">
         <div class="max-w-md mx-auto grid grid-cols-4 h-16 text-xs">
-            <a href="/discover" class="flex flex-col items-center justify-center text-red-pure"><span class="text-lg">🔥</span> Scopri</a>
-            <a href="/matches" class="flex flex-col items-center justify-center text-gray-500"><span class="text-lg">♥</span> Match</a>
-            <a href="/notifications" class="flex flex-col items-center justify-center text-gray-500"><span class="text-lg">💬</span> Chat</a>
-            <a href="/profile" class="flex flex-col items-center justify-center text-gray-500"><span class="text-lg">👤</span> Profilo</a>
+            <a href="/discover" class="flex flex-col items-center justify-center text-red-pure">
+                <span class="text-lg">🔥</span> Scopri
+            </a>
+            <a href="/matches" class="flex flex-col items-center justify-center text-gray-500">
+                <span class="text-lg">♥</span> Match
+            </a>
+            <a href="/notifications" class="flex flex-col items-center justify-center text-gray-500 relative">
+                <span class="text-lg relative">
+                    💬
+                    {% if unread and unread > 0 %}
+                    <span class="absolute -top-2 -right-3 min-w-[18px] h-[18px] bg-[#ff1a1a] text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1">{{ unread if unread < 10 else '9+' }}</span>
+                    {% endif %}
+                </span>
+                Chat
+            </a>
+            <a href="/profile" class="flex flex-col items-center justify-center text-gray-500">
+                <span class="text-lg">👤</span> Profilo
+            </a>
         </div>
     </nav>
 

@@ -62,10 +62,24 @@
 
     <nav class="fixed bottom-0 left-0 right-0 bg-[#0a0a0a] border-t border-white/10">
         <div class="max-w-md mx-auto grid grid-cols-4 h-16 text-xs">
-            <a href="/discover" class="flex flex-col items-center justify-center text-gray-500"><span class="text-lg">🔥</span> Scopri</a>
-            <a href="/matches" class="flex flex-col items-center justify-center text-red-pure"><span class="text-lg">♥</span> Match</a>
-            <a href="/notifications" class="flex flex-col items-center justify-center text-gray-500"><span class="text-lg">💬</span> Chat</a>
-            <a href="/profile" class="flex flex-col items-center justify-center text-gray-500"><span class="text-lg">👤</span> Profilo</a>
+            <a href="/discover" class="flex flex-col items-center justify-center text-gray-500">
+                <span class="text-lg">🔥</span> Scopri
+            </a>
+            <a href="/matches" class="flex flex-col items-center justify-center text-red-pure">
+                <span class="text-lg">♥</span> Match
+            </a>
+            <a href="/notifications" class="flex flex-col items-center justify-center text-gray-500 relative">
+                <span class="text-lg relative">
+                    💬
+                    {% if unread and unread > 0 %}
+                    <span class="absolute -top-2 -right-3 min-w-[18px] h-[18px] bg-[#ff1a1a] text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1">{{ unread if unread < 10 else '9+' }}</span>
+                    {% endif %}
+                </span>
+                Chat
+            </a>
+            <a href="/profile" class="flex flex-col items-center justify-center text-gray-500">
+                <span class="text-lg">👤</span> Profilo
+            </a>
         </div>
     </nav>
 

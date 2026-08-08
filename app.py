@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Spark - Dating Chat Web App
+MyCheating - Dating App with Real-time WebSocket notifications
 """
 
-from fastapi import FastAPI, Request, Form
+from fastapi import FastAPI, Request, Form, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -12,19 +12,19 @@ from passlib.context import CryptContext
 import sqlite3
 from pathlib import Path
 from datetime import datetime, date
-from typing import Optional
+from typing import Optional, Dict, List
 import secrets
 import os
+import json
 
 # ============== CONFIG ==============
 BASE_DIR = Path(__file__).parent
 DB_PATH = BASE_DIR / "dating_chat.db"
 SECRET_KEY = os.environ.get("SECRET_KEY", secrets.token_hex(32))
 
-app = FastAPI(title="Spark Dating")
+app = FastAPI(title="MyCheating")
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
-# Monta static solo se esiste
 static_dir = BASE_DIR / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
@@ -33,6 +33,40 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
+# ============== WEBSOCKET MANAGER ==============
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[int, List[WebSocket]] = {}
+
+    async def connect(self, user_id: int, websocket: WebSocket):
+        await websocket.accept()
+        if user_id not in self.active_connections:
+            self.active_connections[user_id] = []
+        self.active_connections[user_id].append(websocket)
+
+    def disconnect(self, user_id: int, websocket: WebSocket):
+        if user_id in self.active_connections:
+            if websocket in self.active_connections[user_id]:
+                self.active_connections[user_id].remove(websocket)
+            if not self.active_connections[user_id]:
+                del self.active_connections[user_id]
+
+    async def send_to_user(self, user_id: int, message: dict):
+        if user_id in self.active_connections:
+            dead = []
+            for connection in self.active_connections[user_id]:
+                try:
+                    await connection.send_json(message)
+                except:
+                    dead.append(connection)
+            for d in dead:
+                self.disconnect(user_id, d)
+
+
+manager = ConnectionManager()
+
+
+# ============== DATABASE ==============
 def get_db():
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
@@ -84,6 +118,17 @@ def get_interessi_utente(user_id: int) -> list:
         return [r["nome"] for r in rows]
     except:
         return []
+
+
+# ============== WEBSOCKET ROUTE ==============
+@app.websocket("/ws/{user_id}")
+async def websocket_endpoint(websocket: WebSocket, user_id: int):
+    await manager.connect(user_id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(user_id, websocket)
 
 
 # ============== ROUTES ==============
@@ -138,10 +183,7 @@ async def register(
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {
-        "request": request,
-        "error": None
-    })
+    return templates.TemplateResponse("login.html", {"request": request, "error": None})
 
 
 @app.post("/login")
@@ -230,13 +272,15 @@ async def do_swipe(request: Request, to_user_id: int = Form(...), tipo: str = Fo
         return RedirectResponse("/discover", status_code=303)
 
     conn = get_db()
+    match_created = False
+    match_id = None
+
     try:
         conn.execute(
             "INSERT INTO swipes (from_user_id, to_user_id, tipo) VALUES (?, ?, ?)",
             (user["id"], to_user_id, tipo)
         )
 
-        match_created = False
         if tipo in ("like", "superlike"):
             reciproco = conn.execute("""
                 SELECT id FROM swipes
@@ -256,7 +300,7 @@ async def do_swipe(request: Request, to_user_id: int = Form(...), tipo: str = Fo
                     for uid in (user["id"], to_user_id):
                         conn.execute("""
                             INSERT INTO notifications (user_id, tipo, titolo, contenuto, related_id)
-                            VALUES (?, 'nuovo_match', 'Nuovo Match! 🎉', 'Hai un nuovo match!', ?)
+                            VALUES (?, 'nuovo_match', 'Nuovo Match!', 'Hai un nuovo match!', ?)
                         """, (uid, match_id))
                     match_created = True
 
@@ -265,6 +309,19 @@ async def do_swipe(request: Request, to_user_id: int = Form(...), tipo: str = Fo
         pass
     finally:
         conn.close()
+
+    # Invia notifica real-time
+    if match_created:
+        await manager.send_to_user(user["id"], {
+            "type": "nuovo_match",
+            "title": "Nuovo Match! 🎉",
+            "message": "Hai un nuovo match!"
+        })
+        await manager.send_to_user(to_user_id, {
+            "type": "nuovo_match",
+            "title": "Nuovo Match! 🎉",
+            "message": "Hai un nuovo match!"
+        })
 
     if match_created:
         return RedirectResponse("/matches?new_match=1", status_code=303)
@@ -389,6 +446,14 @@ async def send_message(request: Request, conversation_id: int, contenuto: str = 
     """, (altro_id, contenuto[:80], conversation_id))
     conn.commit()
     conn.close()
+
+    # Notifica real-time
+    await manager.send_to_user(altro_id, {
+        "type": "nuovo_messaggio",
+        "title": "Nuovo messaggio",
+        "message": contenuto[:80],
+        "conversation_id": conversation_id
+    })
 
     return RedirectResponse(f"/chat/{conversation_id}", status_code=303)
 

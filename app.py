@@ -705,9 +705,13 @@ async def admin_panel(req: Request):
     user = require_admin(req)
     if not user:
         return RedirectResponse("/login", 303)
+
+    tab = req.query_params.get("tab") or "users"
     q = (req.query_params.get("q") or "").strip()
+
     c = db()
     cur = c.cursor()
+
     cur.execute("SELECT COUNT(*) as c FROM users")
     users_count = cur.fetchone()["c"]
     cur.execute("SELECT COUNT(*) as c FROM matches WHERE attivo=1")
@@ -716,65 +720,89 @@ async def admin_panel(req: Request):
     messages_count = cur.fetchone()["c"]
     cur.execute("SELECT COUNT(*) as c FROM users WHERE is_online=1")
     online_count = cur.fetchone()["c"]
-
-    if q:
-        cur.execute("""
-            SELECT id, nome, username, email, stato, is_admin, is_online, latitude, longitude
-            FROM users
-            WHERE nome ILIKE %s OR username ILIKE %s OR email ILIKE %s
-            ORDER BY id DESC LIMIT 100
-        """, (f"%{q}%", f"%{q}%", f"%{q}%"))
-    else:
-        cur.execute("""
-            SELECT id, nome, username, email, stato, is_admin, is_online, latitude, longitude
-            FROM users ORDER BY id DESC LIMIT 100
-        """)
-    users = cur.fetchall()
-
-    cur.execute("SELECT id, nome, username FROM users WHERE is_online=1 AND stato='attivo' ORDER BY nome LIMIT 50")
-    online_users = cur.fetchall()
-
-    cur.execute("""
-        SELECT m.data_match, u1.nome as nome1, u2.nome as nome2
-        FROM matches m
-        JOIN users u1 ON u1.id = m.user1_id
-        JOIN users u2 ON u2.id = m.user2_id
-        ORDER BY m.data_match DESC LIMIT 20
-    """)
-    matches = cur.fetchall()
-
-    # recent messages with sender and other party
-    recent_messages = []
     try:
+        cur.execute("SELECT COUNT(*) as c FROM swipes")
+        swipes_count = cur.fetchone()["c"]
+    except Exception:
+        swipes_count = 0
+    cur.execute("SELECT COUNT(*) as c FROM users WHERE stato != 'attivo'")
+    banned_count = cur.fetchone()["c"]
+    cur.execute("SELECT COUNT(*) as c FROM users WHERE latitude IS NOT NULL")
+    gps_count = cur.fetchone()["c"]
+
+    users = []
+    recent_messages = []
+    recent_matches = []
+    online_users = []
+
+    if tab == "users" or not tab:
+        if q:
+            like = f"%{q}%"
+            cur.execute("""
+                SELECT id, nome, username, email, stato, is_admin, is_online, latitude, longitude
+                FROM users
+                WHERE nome ILIKE %s OR email ILIKE %s OR username ILIKE %s
+                ORDER BY id DESC LIMIT 100
+            """, (like, like, like))
+        else:
+            cur.execute("""
+                SELECT id, nome, username, email, stato, is_admin, is_online, latitude, longitude
+                FROM users ORDER BY id DESC LIMIT 100
+            """)
+        users = [dict(u) for u in cur.fetchall()]
+
+    if tab == "messages":
+        try:
+            cur.execute("""
+                SELECT m.contenuto, m.data_invio, m.conversation_id, u.nome as sender_nome
+                FROM messages m
+                JOIN users u ON u.id = m.sender_id
+                WHERE COALESCE(m.eliminato, 0) = 0
+                ORDER BY m.data_invio DESC LIMIT 40
+            """)
+            recent_messages = [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            print("admin messages error:", e)
+
+    if tab == "matches":
         cur.execute("""
-            SELECT msg.contenuto, msg.data_invio,
-                   us.nome as sender_nome,
-                   CASE WHEN mt.user1_id = msg.sender_id THEN u2.nome ELSE u1.nome END as receiver_nome
-            FROM messages msg
-            JOIN conversations conv ON conv.id = msg.conversation_id
-            JOIN matches mt ON mt.id = conv.match_id
-            JOIN users us ON us.id = msg.sender_id
-            JOIN users u1 ON u1.id = mt.user1_id
-            JOIN users u2 ON u2.id = mt.user2_id
-            WHERE msg.eliminato = 0
-            ORDER BY msg.data_invio DESC
-            LIMIT 30
+            SELECT m.data_match, u1.nome as nome1, u2.nome as nome2
+            FROM matches m
+            JOIN users u1 ON u1.id = m.user1_id
+            JOIN users u2 ON u2.id = m.user2_id
+            ORDER BY m.data_match DESC LIMIT 30
         """)
-        recent_messages = cur.fetchall()
-    except Exception as e:
-        print("recent messages error:", e)
+        recent_matches = [dict(r) for r in cur.fetchall()]
+
+    if tab == "online":
+        cur.execute("""
+            SELECT id, nome, username FROM users
+            WHERE is_online = 1 AND stato = 'attivo'
+            ORDER BY ultimo_accesso DESC NULLS LAST LIMIT 50
+        """)
+        online_users = [dict(r) for r in cur.fetchall()]
 
     cur.close()
     c.close()
+
     return templates.TemplateResponse("admin.html", {
         "request": req,
         "user": user,
+        "tab": tab,
         "q": q,
-        "stats": {"users": users_count, "matches": matches_count, "messages": messages_count, "online": online_count},
-        "users": [dict(u) for u in users],
-        "online_users": [dict(o) for o in online_users],
-        "matches": [dict(m) for m in matches],
-        "recent_messages": [dict(m) for m in recent_messages],
+        "stats": {
+            "users": users_count,
+            "matches": matches_count,
+            "messages": messages_count,
+            "online": online_count,
+            "swipes": swipes_count,
+            "banned": banned_count,
+            "gps": gps_count,
+        },
+        "users": users,
+        "recent_messages": recent_messages,
+        "recent_matches": recent_matches,
+        "online_users": online_users,
     })
 
 

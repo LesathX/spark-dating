@@ -7,107 +7,206 @@
     <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { background-color: #0a0a0a; font-family: 'Oswald', sans-serif; }
+        body { background: #0a0a0a; font-family: 'Oswald', sans-serif; }
         .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
         .text-red-pure { color: #ff1a1a; }
+        input:focus, select:focus { border-color: #ff1a1a !important; outline: none; }
     </style>
 </head>
 <body class="text-white min-h-screen pb-28">
-    <div class="flex items-center justify-between px-5 py-4 border-b border-white/10">
+
+    <!-- Top -->
+    <div class="sticky top-0 z-20 bg-[#0a0a0a]/95 backdrop-blur border-b border-white/10 px-4 py-3 flex items-center justify-between">
         <div class="font-hot text-xl tracking-wider flex items-center gap-2">
-            <span class="text-red-pure">🔥</span> ADMIN PANEL
+            <span class="text-red-pure">⚙️</span> ADMIN
         </div>
-        <div class="flex gap-4 text-sm">
-            <a href="/discover" class="text-gray-400 hover:text-white">App</a>
-            <a href="/logout" class="text-red-pure">Esci</a>
-        </div>
+        <a href="/discover" class="text-sm text-gray-400 hover:text-white">← App</a>
     </div>
-    <div class="max-w-5xl mx-auto px-4 py-8">
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
-            <div class="bg-white/5 border border-white/10 rounded-xl p-5 text-center">
+
+    <div class="max-w-5xl mx-auto px-4 py-6">
+
+        <!-- Stats -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+            <div class="bg-gradient-to-br from-[#ff1a1a]/20 to-transparent border border-[#ff1a1a]/30 rounded-2xl p-4 text-center">
                 <div class="text-3xl font-hot text-red-pure">{{ stats.users }}</div>
-                <div class="text-xs text-gray-500 tracking-widest mt-1">UTENTI</div>
+                <div class="text-[10px] text-gray-500 tracking-widest mt-1">UTENTI</div>
             </div>
-            <div class="bg-white/5 border border-white/10 rounded-xl p-5 text-center">
+            <div class="bg-white/5 border border-white/10 rounded-2xl p-4 text-center">
                 <div class="text-3xl font-hot text-red-pure">{{ stats.matches }}</div>
-                <div class="text-xs text-gray-500 tracking-widest mt-1">MATCH</div>
+                <div class="text-[10px] text-gray-500 tracking-widest mt-1">MATCH</div>
             </div>
-            <div class="bg-white/5 border border-white/10 rounded-xl p-5 text-center">
+            <div class="bg-white/5 border border-white/10 rounded-2xl p-4 text-center">
                 <div class="text-3xl font-hot text-red-pure">{{ stats.messages }}</div>
-                <div class="text-xs text-gray-500 tracking-widest mt-1">MESSAGGI</div>
+                <div class="text-[10px] text-gray-500 tracking-widest mt-1">MESSAGGI</div>
             </div>
-            <div class="bg-white/5 border border-white/10 rounded-xl p-5 text-center">
-                <div class="text-3xl font-hot text-red-pure">{{ stats.online }}</div>
-                <div class="text-xs text-gray-500 tracking-widest mt-1">ONLINE</div>
+            <div class="bg-white/5 border border-white/10 rounded-2xl p-4 text-center">
+                <div class="text-3xl font-hot text-green-400">{{ stats.online }}</div>
+                <div class="text-[10px] text-gray-500 tracking-widest mt-1">ONLINE</div>
             </div>
         </div>
-        <h2 class="font-hot text-2xl tracking-wide mb-4">UTENTI</h2>
-        <div class="bg-white/5 border border-white/10 rounded-xl overflow-hidden mb-10">
+
+        <!-- Extra stats -->
+        <div class="grid grid-cols-3 gap-3 mb-8">
+            <div class="bg-white/5 border border-white/10 rounded-xl p-3 text-center">
+                <div class="text-xl font-hot">{{ stats.swipes }}</div>
+                <div class="text-[10px] text-gray-500">SWIPE</div>
+            </div>
+            <div class="bg-white/5 border border-white/10 rounded-xl p-3 text-center">
+                <div class="text-xl font-hot text-red-400">{{ stats.banned }}</div>
+                <div class="text-[10px] text-gray-500">BANNATI</div>
+            </div>
+            <div class="bg-white/5 border border-white/10 rounded-xl p-3 text-center">
+                <div class="text-xl font-hot">{{ stats.gps }}</div>
+                <div class="text-[10px] text-gray-500">CON GPS</div>
+            </div>
+        </div>
+
+        <!-- Search -->
+        <form method="get" action="/admin" class="mb-6 flex gap-2">
+            <input type="text" name="q" value="{{ q or '' }}" placeholder="Cerca nome, email, username..."
+                   class="flex-1 bg-white/5 border border-white/15 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500">
+            <button class="bg-[#ff1a1a] px-5 py-3 rounded-xl font-semibold text-sm">Cerca</button>
+            {% if q %}<a href="/admin" class="bg-white/10 px-4 py-3 rounded-xl text-sm flex items-center">✕</a>{% endif %}
+        </form>
+
+        <!-- Tabs -->
+        <div class="flex gap-2 mb-5 overflow-x-auto text-sm">
+            <a href="/admin" class="shrink-0 px-4 py-2 rounded-full {% if not tab or tab == 'users' %}bg-[#ff1a1a] text-white{% else %}bg-white/5 text-gray-400 border border-white/10{% endif %}">Utenti</a>
+            <a href="/admin?tab=messages" class="shrink-0 px-4 py-2 rounded-full {% if tab == 'messages' %}bg-[#ff1a1a] text-white{% else %}bg-white/5 text-gray-400 border border-white/10{% endif %}">Messaggi</a>
+            <a href="/admin?tab=matches" class="shrink-0 px-4 py-2 rounded-full {% if tab == 'matches' %}bg-[#ff1a1a] text-white{% else %}bg-white/5 text-gray-400 border border-white/10{% endif %}">Match</a>
+            <a href="/admin?tab=online" class="shrink-0 px-4 py-2 rounded-full {% if tab == 'online' %}bg-[#ff1a1a] text-white{% else %}bg-white/5 text-gray-400 border border-white/10{% endif %}">Online</a>
+        </div>
+
+        {% if not tab or tab == 'users' %}
+        <!-- Users table -->
+        <h2 class="font-hot text-2xl tracking-wide mb-3">UTENTI {% if q %}<span class="text-sm text-gray-500">· risultati per "{{ q }}"</span>{% endif %}</h2>
+        <div class="bg-white/5 border border-white/10 rounded-2xl overflow-hidden mb-8">
             <div class="overflow-x-auto">
                 <table class="w-full text-sm">
-                    <thead class="border-b border-white/10 text-gray-500 text-left">
+                    <thead class="border-b border-white/10 text-gray-500 text-left text-xs">
                         <tr>
-                            <th class="px-4 py-3">ID</th>
-                            <th class="px-4 py-3">Nome</th>
-                            <th class="px-4 py-3">Email</th>
-                            <th class="px-4 py-3">Stato</th>
-                            <th class="px-4 py-3">Azioni</th>
+                            <th class="px-3 py-3">ID</th>
+                            <th class="px-3 py-3">Utente</th>
+                            <th class="px-3 py-3">Email</th>
+                            <th class="px-3 py-3">Stato</th>
+                            <th class="px-3 py-3">GPS</th>
+                            <th class="px-3 py-3">Azioni</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for u in users %}
                         <tr class="border-b border-white/5 hover:bg-white/5">
-                            <td class="px-4 py-3 text-gray-500">{{ u.id }}</td>
-                            <td class="px-4 py-3">
-                                <span class="font-hot">{{ u.nome }}</span>
-                                <span class="text-gray-500 text-xs">@{{ u.username }}</span>
-                                {% if u.is_admin %}<span class="ml-2 text-xs bg-red-500/20 text-red-pure px-2 py-0.5 rounded">ADMIN</span>{% endif %}
+                            <td class="px-3 py-3 text-gray-500">{{ u.id }}</td>
+                            <td class="px-3 py-3">
+                                <div class="font-hot">{{ u.nome }}</div>
+                                <div class="text-xs text-gray-500">@{{ u.username }}</div>
+                                {% if u.is_admin %}<span class="text-[10px] bg-red-500/20 text-red-pure px-1.5 py-0.5 rounded">ADMIN</span>{% endif %}
+                                {% if u.is_online %}<span class="text-[10px] text-green-400">● online</span>{% endif %}
                             </td>
-                            <td class="px-4 py-3 text-gray-400">{{ u.email }}</td>
-                            <td class="px-4 py-3">
+                            <td class="px-3 py-3 text-gray-400 text-xs">{{ u.email }}</td>
+                            <td class="px-3 py-3">
                                 {% if u.stato == 'attivo' %}
-                                <span class="text-green-400">attivo</span>
+                                <span class="text-green-400 text-xs">attivo</span>
                                 {% else %}
-                                <span class="text-red-400">{{ u.stato }}</span>
+                                <span class="text-red-400 text-xs">{{ u.stato }}</span>
                                 {% endif %}
                             </td>
-                            <td class="px-4 py-3">
-                                <div class="flex gap-2">
+                            <td class="px-3 py-3 text-xs">
+                                {% if u.latitude %}📍{% else %}—{% endif %}
+                            </td>
+                            <td class="px-3 py-3">
+                                <div class="flex flex-wrap gap-1">
                                     {% if u.stato == 'attivo' %}
                                     <form method="post" action="/admin/ban/{{ u.id }}">
-                                        <button class="text-xs bg-red-500/20 text-red-pure px-3 py-1 rounded">Banna</button>
+                                        <button class="text-[10px] bg-red-500/20 text-red-pure px-2 py-1 rounded">Ban</button>
                                     </form>
                                     {% else %}
                                     <form method="post" action="/admin/unban/{{ u.id }}">
-                                        <button class="text-xs bg-green-500/20 text-green-400 px-3 py-1 rounded">Riattiva</button>
+                                        <button class="text-[10px] bg-green-500/20 text-green-400 px-2 py-1 rounded">Unban</button>
                                     </form>
                                     {% endif %}
                                     {% if not u.is_admin %}
-                                    <form method="post" action="/admin/delete/{{ u.id }}" onsubmit="return confirm('Eliminare?')">
-                                        <button class="text-xs bg-white/10 text-gray-400 px-3 py-1 rounded">Elimina</button>
+                                    <form method="post" action="/admin/make_admin/{{ u.id }}">
+                                        <button class="text-[10px] bg-white/10 text-gray-300 px-2 py-1 rounded">Admin+</button>
                                     </form>
+                                    <form method="post" action="/admin/delete/{{ u.id }}" onsubmit="return confirm('Eliminare {{ u.nome }}?')">
+                                        <button class="text-[10px] bg-white/5 text-gray-500 px-2 py-1 rounded">Del</button>
+                                    </form>
+                                    {% else %}
+                                    {% if u.id != user.id %}
+                                    <form method="post" action="/admin/remove_admin/{{ u.id }}">
+                                        <button class="text-[10px] bg-white/10 text-gray-400 px-2 py-1 rounded">Admin−</button>
+                                    </form>
+                                    {% endif %}
                                     {% endif %}
                                 </div>
                             </td>
                         </tr>
+                        {% else %}
+                        <tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">Nessun utente</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
         </div>
-        <h2 class="font-hot text-2xl tracking-wide mb-4">ULTIMI MATCH</h2>
-        <div class="bg-white/5 border border-white/10 rounded-xl p-4 space-y-2">
-            {% for m in matches %}
+        {% endif %}
+
+        {% if tab == 'messages' %}
+        <h2 class="font-hot text-2xl tracking-wide mb-3">ULTIMI MESSAGGI</h2>
+        <div class="space-y-2 mb-8">
+            {% for m in recent_messages %}
+            <div class="bg-white/5 border border-white/10 rounded-xl p-3 text-sm">
+                <div class="flex justify-between gap-2 mb-1">
+                    <span class="font-hot text-red-pure">{{ m.sender_nome }}</span>
+                    <span class="text-[10px] text-gray-500">{{ m.data_invio }}</span>
+                </div>
+                <p class="text-gray-300">{{ m.contenuto }}</p>
+                <p class="text-[10px] text-gray-600 mt-1">chat #{{ m.conversation_id }}</p>
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-sm">Nessun messaggio</p>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if tab == 'matches' %}
+        <h2 class="font-hot text-2xl tracking-wide mb-3">ULTIMI MATCH</h2>
+        <div class="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2 mb-8">
+            {% for m in recent_matches %}
             <div class="flex justify-between items-center py-2 border-b border-white/5 text-sm">
-                <span>{{ m.nome1 }} ↔ {{ m.nome2 }}</span>
+                <span class="font-hot">{{ m.nome1 }} <span class="text-red-pure">♥</span> {{ m.nome2 }}</span>
                 <span class="text-gray-500 text-xs">{{ m.data_match }}</span>
             </div>
             {% else %}
             <p class="text-gray-500 text-sm">Nessun match</p>
             {% endfor %}
         </div>
+        {% endif %}
+
+        {% if tab == 'online' %}
+        <h2 class="font-hot text-2xl tracking-wide mb-3">UTENTI ONLINE</h2>
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-8">
+            {% for u in online_users %}
+            <div class="bg-white/5 border border-green-500/20 rounded-xl p-3 flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-gradient-to-br from-red-700 to-black flex items-center justify-center font-hot relative">
+                    {{ u.nome[0] | upper }}
+                    <span class="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-400 border-2 border-[#0a0a0a] rounded-full"></span>
+                </div>
+                <div>
+                    <div class="font-hot text-sm">{{ u.nome }}</div>
+                    <div class="text-[10px] text-gray-500">@{{ u.username }}</div>
+                </div>
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-sm col-span-2">Nessuno online</p>
+            {% endfor %}
+        </div>
+        {% endif %}
+
     </div>
-        <nav class="fixed bottom-0 left-0 right-0 bg-[#0a0a0a]/95 backdrop-blur border-t border-white/10 z-20">
+
+    <!-- Bottom nav -->
+    <nav class="fixed bottom-0 left-0 right-0 bg-[#0a0a0a]/95 backdrop-blur border-t border-white/10 z-20">
         <div class="max-w-md mx-auto grid h-[72px] text-[10px] {% if user.is_admin %}grid-cols-6{% else %}grid-cols-5{% endif %}">
             <a href="/discover" class="flex flex-col items-center justify-center text-gray-500 gap-0.5">
                 <span class="text-xl">🔥</span> Scopri

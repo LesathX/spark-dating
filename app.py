@@ -50,7 +50,7 @@ def db():
         port=5432,
         database="postgres",
         user="postgres.xbetgvmqqadkthydwxyr",
-        password="8H2XjZLhqabhnYS0",
+        password="YIM3kn5OXQtU2EQ8",
         cursor_factory=RealDictCursor,
         sslmode="require",
     )

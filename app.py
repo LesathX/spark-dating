@@ -23,7 +23,15 @@ DB_PATH = BASE_DIR / "dating_chat.db"
 SECRET_KEY = os.environ.get("SECRET_KEY", secrets.token_hex(32))
 
 app = FastAPI(title="MyCheating")
-app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SECRET_KEY,
+    session_cookie="session",
+    max_age=60 * 60 * 24 * 14,
+    same_site="lax",
+    https_only=True
+)
 
 static_dir = BASE_DIR / "static"
 if static_dir.exists():
@@ -310,7 +318,6 @@ async def do_swipe(request: Request, to_user_id: int = Form(...), tipo: str = Fo
     finally:
         conn.close()
 
-    # Invia notifica real-time
     if match_created:
         await manager.send_to_user(user["id"], {
             "type": "nuovo_match",
@@ -447,7 +454,6 @@ async def send_message(request: Request, conversation_id: int, contenuto: str = 
     conn.commit()
     conn.close()
 
-    # Notifica real-time
     await manager.send_to_user(altro_id, {
         "type": "nuovo_messaggio",
         "title": "Nuovo messaggio",

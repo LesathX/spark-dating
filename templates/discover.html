@@ -9,9 +9,6 @@
     <style>
         body { background-color: #0a0a0a; font-family: 'Oswald', sans-serif; }
         .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
-        .btn-red { background: #ff1a1a; }
-        .btn-like { background: #22c55e; }
-        .btn-dislike { background: #ff1a1a; }
         .text-red-pure { color: #ff1a1a; }
     </style>
 </head>
@@ -61,16 +58,32 @@
             </div>
 
             <!-- Pulsanti -->
-            <div class="flex justify-center gap-6 pb-8">
+            <div class="flex justify-center items-center gap-5 pb-8">
+                <!-- Dislike (X rossa) -->
                 <form method="post" action="/swipe">
                     <input type="hidden" name="to_user_id" value="{{ candidate.id }}">
                     <input type="hidden" name="tipo" value="dislike">
-                    <button class="w-16 h-16 rounded-full btn-dislike text-white text-2xl flex items-center justify-center">✕</button>
+                    <button class="w-16 h-16 rounded-full bg-[#ff1a1a] text-white text-2xl flex items-center justify-center shadow-lg shadow-red-900/40">
+                        ✕
+                    </button>
                 </form>
+
+                <!-- Superlike (fiamma) -->
+                <form method="post" action="/swipe">
+                    <input type="hidden" name="to_user_id" value="{{ candidate.id }}">
+                    <input type="hidden" name="tipo" value="superlike">
+                    <button class="w-14 h-14 rounded-full bg-orange-500 text-white text-xl flex items-center justify-center shadow-lg shadow-orange-900/40">
+                        🔥
+                    </button>
+                </form>
+
+                <!-- Like (cuore verde) -->
                 <form method="post" action="/swipe">
                     <input type="hidden" name="to_user_id" value="{{ candidate.id }}">
                     <input type="hidden" name="tipo" value="like">
-                    <button class="w-16 h-16 rounded-full btn-like text-white text-2xl flex items-center justify-center">♥</button>
+                    <button class="w-16 h-16 rounded-full bg-[#22c55e] text-white text-2xl flex items-center justify-center shadow-lg shadow-green-900/40">
+                        ♥
+                    </button>
                 </form>
             </div>
         </div>

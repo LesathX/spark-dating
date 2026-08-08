@@ -734,6 +734,9 @@ async def admin_panel(req: Request):
     recent_messages = []
     recent_matches = []
     online_users = []
+    conversations = []
+    open_conversation = None
+    thread_messages = []
 
     if tab == "users" or not tab:
         if q:
@@ -751,18 +754,55 @@ async def admin_panel(req: Request):
             """)
         users = [dict(u) for u in cur.fetchall()]
 
+    conversations = []
+    open_conversation = None
+    thread_messages = []
     if tab == "messages":
         try:
             cur.execute("""
-                SELECT m.contenuto, m.data_invio, m.conversation_id, u.nome as sender_nome
-                FROM messages m
-                JOIN users u ON u.id = m.sender_id
-                WHERE COALESCE(m.eliminato, 0) = 0
-                ORDER BY m.data_invio DESC LIMIT 40
+                SELECT c.id, c.ultimo_messaggio_at, m.data_match,
+                       m.user1_id, m.user2_id,
+                       u1.nome as nome1, u2.nome as nome2,
+                       (SELECT COUNT(*) FROM messages msg WHERE msg.conversation_id = c.id AND COALESCE(msg.eliminato,0)=0) as msg_count,
+                       (SELECT msg.contenuto FROM messages msg WHERE msg.conversation_id = c.id AND COALESCE(msg.eliminato,0)=0 ORDER BY msg.data_invio DESC LIMIT 1) as last_message
+                FROM conversations c
+                JOIN matches m ON m.id = c.match_id
+                JOIN users u1 ON u1.id = m.user1_id
+                JOIN users u2 ON u2.id = m.user2_id
+                ORDER BY COALESCE(c.ultimo_messaggio_at, m.data_match) DESC
+                LIMIT 200
             """)
-            recent_messages = [dict(r) for r in cur.fetchall()]
+            conversations = [dict(r) for r in cur.fetchall()]
+
+            conv_id = req.query_params.get("conv")
+            if conv_id:
+                try:
+                    conv_id = int(conv_id)
+                except Exception:
+                    conv_id = None
+                if conv_id:
+                    cur.execute("""
+                        SELECT c.id, m.user1_id, m.user2_id, u1.nome as nome1, u2.nome as nome2
+                        FROM conversations c
+                        JOIN matches m ON m.id = c.match_id
+                        JOIN users u1 ON u1.id = m.user1_id
+                        JOIN users u2 ON u2.id = m.user2_id
+                        WHERE c.id = %s
+                    """, (conv_id,))
+                    row = cur.fetchone()
+                    if row:
+                        open_conversation = dict(row)
+                        cur.execute("""
+                            SELECT m.id, m.sender_id, m.contenuto, m.data_invio, u.nome as sender_nome
+                            FROM messages m
+                            JOIN users u ON u.id = m.sender_id
+                            WHERE m.conversation_id = %s AND COALESCE(m.eliminato,0)=0
+                            ORDER BY m.data_invio ASC
+                        """, (conv_id,))
+                        thread_messages = [dict(r) for r in cur.fetchall()]
         except Exception as e:
             print("admin messages error:", e)
+            conversations = []
 
     if tab == "matches":
         cur.execute("""
@@ -800,7 +840,10 @@ async def admin_panel(req: Request):
             "gps": gps_count,
         },
         "users": users,
-        "recent_messages": recent_messages,
+        "recent_messages": [],
+        "conversations": conversations if tab == "messages" else [],
+        "open_conversation": open_conversation if tab == "messages" else None,
+        "thread_messages": thread_messages if tab == "messages" else [],
         "recent_matches": recent_matches,
         "online_users": online_users,
     })

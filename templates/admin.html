@@ -152,21 +152,48 @@
         {% endif %}
 
         {% if tab == 'messages' %}
-        <h2 class="font-hot text-2xl tracking-wide mb-3">ULTIMI MESSAGGI</h2>
-        <div class="space-y-2 mb-8">
-            {% for m in recent_messages %}
-            <div class="bg-white/5 border border-white/10 rounded-xl p-3 text-sm">
-                <div class="flex justify-between gap-2 mb-1">
-                    <span class="font-hot text-red-pure">{{ m.sender_nome }}</span>
-                    <span class="text-[10px] text-gray-500">{{ m.data_invio }}</span>
-                </div>
-                <p class="text-gray-300">{{ m.contenuto }}</p>
-                <p class="text-[10px] text-gray-600 mt-1">chat #{{ m.conversation_id }}</p>
+        <h2 class="font-hot text-2xl tracking-wide mb-3">TUTTE LE CONVERSAZIONI</h2>
+        <p class="text-gray-500 text-sm mb-4">{{ conversations|length }} conversazioni</p>
+
+        {% if open_conversation %}
+        <div class="mb-4">
+            <a href="/admin?tab=messages" class="text-sm text-red-pure">← Torna alle conversazioni</a>
+            <div class="mt-2 mb-3 font-hot text-lg">
+                {{ open_conversation.nome1 }} <span class="text-red-pure">💬</span> {{ open_conversation.nome2 }}
             </div>
+            <div class="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3 max-h-[60vh] overflow-y-auto mb-8">
+                {% for m in thread_messages %}
+                <div class="text-sm {% if m.sender_id == open_conversation.user1_id %}text-right{% endif %}">
+                    <div class="inline-block max-w-[85%] px-3 py-2 rounded-xl {% if m.sender_id == open_conversation.user1_id %}bg-[#ff1a1a]/30{% else %}bg-white/10{% endif %}">
+                        <div class="text-[10px] text-gray-400 mb-0.5">{{ m.sender_nome }} · {{ m.data_invio }}</div>
+                        <div>{{ m.contenuto }}</div>
+                    </div>
+                </div>
+                {% else %}
+                <p class="text-gray-500 text-sm text-center py-6">Nessun messaggio in questa chat</p>
+                {% endfor %}
+            </div>
+        </div>
+        {% else %}
+        <div class="space-y-2 mb-8">
+            {% for c in conversations %}
+            <a href="/admin?tab=messages&conv={{ c.id }}" class="block bg-white/5 border border-white/10 rounded-xl p-4 hover:border-[#ff1a1a]/40 transition">
+                <div class="flex justify-between items-start gap-2">
+                    <div>
+                        <div class="font-hot text-base">{{ c.nome1 }} <span class="text-red-pure">↔</span> {{ c.nome2 }}</div>
+                        <p class="text-sm text-gray-400 mt-1 truncate">{{ c.last_message or 'Nessun messaggio' }}</p>
+                    </div>
+                    <div class="text-right shrink-0">
+                        <div class="text-[10px] text-gray-500">{{ c.msg_count }} msg</div>
+                        <div class="text-[10px] text-gray-600 mt-1">{{ c.ultimo_messaggio_at or c.data_match }}</div>
+                    </div>
+                </div>
+            </a>
             {% else %}
-            <p class="text-gray-500 text-sm">Nessun messaggio</p>
+            <p class="text-gray-500 text-sm">Nessuna conversazione</p>
             {% endfor %}
         </div>
+        {% endif %}
         {% endif %}
 
         {% if tab == 'matches' %}

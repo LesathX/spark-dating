@@ -1,36 +1,74 @@
-{% extends "base.html" %}
-{% block title %}Notifiche - Spark{% endblock %}
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notifiche – MyCheating</title>
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0a0a0a; font-family: 'Oswald', sans-serif; }
+        .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
+        .text-red-pure { color: #ff1a1a; }
+    </style>
+</head>
+<body class="text-white min-h-screen pb-24">
 
-{% block content %}
-<h1 class="text-2xl font-bold text-gray-900 mb-6">Notifiche</h1>
-
-{% if notifications %}
-<div class="space-y-3">
-    {% for n in notifications %}
-    <div class="bg-white rounded-2xl p-4 card-shadow flex gap-3 {% if not n.letto %}ring-2 ring-spark-100{% endif %}">
-        <div class="w-11 h-11 rounded-full flex items-center justify-center shrink-0
-            {% if n.tipo == 'nuovo_match' %}bg-spark-100 text-spark-500
-            {% elif n.tipo == 'nuovo_messaggio' %}bg-blue-100 text-blue-500
-            {% else %}bg-gray-100 text-gray-500{% endif %}">
-            {% if n.tipo == 'nuovo_match' %}🎉
-            {% elif n.tipo == 'nuovo_messaggio' %}💬
-            {% else %}🔔{% endif %}
+    <!-- Top bar -->
+    <div class="flex items-center justify-between px-5 py-4 border-b border-white/10">
+        <div class="font-hot text-xl tracking-wider flex items-center gap-2">
+            <span class="text-red-pure">🔥</span> MY CHEATING
         </div>
-        <div class="flex-1 min-w-0">
-            <div class="font-semibold text-gray-900 text-sm">{{ n.titolo or n.tipo }}</div>
-            <p class="text-gray-600 text-sm mt-0.5 line-clamp-2">{{ n.contenuto }}</p>
-            <div class="text-xs text-gray-400 mt-1.5">
-                {{ n.data_creazione[8:10] }}/{{ n.data_creazione[5:7] }} {{ n.data_creazione[11:16] if n.data_creazione else '' }}
-            </div>
-        </div>
+        <a href="/profile" class="text-sm text-gray-400">Profilo</a>
     </div>
-    {% endfor %}
-</div>
-{% else %}
-<div class="text-center py-20">
-    <div class="text-5xl mb-4">🔕</div>
-    <h2 class="text-lg font-semibold text-gray-700">Nessuna notifica</h2>
-    <p class="text-gray-500 text-sm mt-1">Quando avrai match o messaggi appariranno qui</p>
-</div>
-{% endif %}
-{% endblock %}
+
+    <div class="max-w-md mx-auto px-4 py-6">
+        <h1 class="font-hot text-3xl tracking-wide mb-6">NOTIFICHE</h1>
+
+        {% if notifications %}
+        <div class="space-y-3">
+            {% for n in notifications %}
+            <div class="bg-white/5 border border-white/10 rounded-2xl p-4 {% if not n.letto %}border-[#ff1a1a]/40{% endif %}">
+                <div class="flex items-start justify-between gap-3">
+                    <div>
+                        <div class="font-hot text-lg tracking-wide {% if not n.letto %}text-red-pure{% endif %}">
+                            {{ n.titolo }}
+                        </div>
+                        <p class="text-sm text-gray-400 mt-1">{{ n.contenuto }}</p>
+                        <p class="text-xs text-gray-600 mt-2">{{ n.data_creazione }}</p>
+                    </div>
+                    {% if not n.letto %}
+                    <span class="w-2.5 h-2.5 rounded-full bg-[#ff1a1a] shrink-0 mt-2"></span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-20">
+            <div class="text-5xl mb-4">🔔</div>
+            <h2 class="font-hot text-2xl mb-2">Nessuna notifica</h2>
+            <p class="text-gray-500">Quando avrai match o messaggi appariranno qui</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Bottom nav -->
+    <nav class="fixed bottom-0 left-0 right-0 bg-[#0a0a0a] border-t border-white/10">
+        <div class="max-w-md mx-auto grid grid-cols-4 h-16 text-xs">
+            <a href="/discover" class="flex flex-col items-center justify-center text-gray-500">
+                <span class="text-lg">🔥</span> Scopri
+            </a>
+            <a href="/matches" class="flex flex-col items-center justify-center text-gray-500">
+                <span class="text-lg">♥</span> Match
+            </a>
+            <a href="/notifications" class="flex flex-col items-center justify-center text-red-pure">
+                <span class="text-lg">💬</span> Chat
+            </a>
+            <a href="/profile" class="flex flex-col items-center justify-center text-gray-500">
+                <span class="text-lg">👤</span> Profilo
+            </a>
+        </div>
+    </nav>
+</body>
+</html>

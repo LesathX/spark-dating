@@ -26,12 +26,6 @@
             <p class="text-gray-400 text-sm">Crea il tuo account gratis</p>
         </div>
 
-        {% if error %}
-        <div class="bg-red-500/10 border border-red-500/40 text-red-400 text-sm px-4 py-3 rounded-lg mb-6">
-            {{ error }}
-        </div>
-        {% endif %}
-
         <form method="post" action="/register" class="space-y-4">
             <div class="grid grid-cols-2 gap-3">
                 <input type="text" name="nome" required placeholder="Nome"

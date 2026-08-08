@@ -403,8 +403,50 @@ async def swipe(req: Request, to_user_id: int = Form(...), tipo: str = Form(...)
     if match_created:
         await manager.send(user["id"], {"type": "nuovo_match", "title": "Nuovo Match!", "message": "Hai un nuovo match!"})
         await manager.send(to_user_id, {"type": "nuovo_match", "title": "Nuovo Match!", "message": "Hai un nuovo match!"})
-        return RedirectResponse("/matches?new_match=1", 303)
+        return RedirectResponse("/chats?new_match=1", 303)
     return RedirectResponse("/discover", 303)
+
+
+@app.get("/chats", response_class=HTMLResponse)
+async def chats_page(req: Request):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    cur.execute("""SELECT m.id as match_id, m.data_match,
+                  CASE WHEN m.user1_id=%s THEN m.user2_id ELSE m.user1_id END as altro_id,
+                  u.username, u.nome, u.foto_principale_url, u.is_online, u.latitude, u.longitude,
+                  c.id as conversation_id
+           FROM matches m
+           JOIN users u ON u.id = CASE WHEN m.user1_id=%s THEN m.user2_id ELSE m.user1_id END
+           LEFT JOIN conversations c ON c.match_id = m.id
+           WHERE (m.user1_id=%s OR m.user2_id=%s) AND m.attivo=1
+           ORDER BY COALESCE(c.ultimo_messaggio_at, m.data_match) DESC""", (user["id"], user["id"], user["id"], user["id"]))
+    matches = cur.fetchall()
+    match_list = []
+    my_lat, my_lng = user.get("latitude"), user.get("longitude")
+    for m in matches:
+        d = dict(m)
+        try:
+            cur.execute("SELECT data_nascita FROM users WHERE id=%s", (d["altro_id"],))
+            row = cur.fetchone()
+            d["eta"] = eta(row["data_nascita"]) if row else 0
+        except Exception:
+            d["eta"] = 0
+        if my_lat and my_lng and d.get("latitude") and d.get("longitude"):
+            dist = haversine_km(my_lat, my_lng, d["latitude"], d["longitude"])
+            d["distance_km"] = round(dist, 1) if dist is not None else None
+        else:
+            d["distance_km"] = None
+        match_list.append(d)
+    new_match = req.query_params.get("new_match")
+    cur.close()
+    c.close()
+    return templates.TemplateResponse("chats.html", {
+        "request": req, "user": user, "matches": match_list, "new_match": new_match, "unread": unread_count(user["id"])
+    })
+
 
 @app.get("/matches", response_class=HTMLResponse)
 async def matches_page(req: Request):

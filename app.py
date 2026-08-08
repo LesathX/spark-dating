@@ -1,23 +1,27 @@
 #!/usr/bin/env python3
 """
-MyCheating - Dating App
+MyCheating - Dating App with Supabase (PostgreSQL)
 """
 
 from fastapi import FastAPI, Request, Form, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from passlib.context import CryptContext
-import sqlite3
 from pathlib import Path
 from datetime import datetime, date
 from typing import Optional, Dict, List
-import secrets
 import os
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
+# ============== CONFIG ==============
 BASE_DIR = Path(__file__).parent
-DB_PATH = BASE_DIR / "dating_chat.db"
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql://postgres:LjkQuaJFolj7T004@db.xbetgvmqqadkthydwxyr.supabase.co:5432/postgres"
+)
 SECRET_KEY = os.environ.get("SECRET_KEY", "mycheating_secret_key_2026_super_sicura_123456")
 
 app = FastAPI(title="MyCheating")
@@ -28,7 +32,7 @@ app.add_middleware(
     session_cookie="mycheating_session",
     max_age=2592000,
     same_site="lax",
-    https_only=False   # importante su Render
+    https_only=False
 )
 
 static_dir = BASE_DIR / "static"
@@ -39,6 +43,7 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
+# ============== WEBSOCKET ==============
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[int, List[WebSocket]] = {}
@@ -71,10 +76,9 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+# ============== DATABASE ==============
 def get_db():
-    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
     return conn
 
 
@@ -95,9 +99,10 @@ def get_current_user(request: Request):
         return None
     try:
         conn = get_db()
-        user = conn.execute(
-            "SELECT * FROM users WHERE id = ? AND stato = 'attivo'", (user_id,)
-        ).fetchone()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM users WHERE id = %s AND stato = 'attivo'", (user_id,))
+        user = cur.fetchone()
+        cur.close()
         conn.close()
         return dict(user) if user else None
     except Exception as e:
@@ -105,9 +110,12 @@ def get_current_user(request: Request):
         return None
 
 
-def calcola_eta(data_nascita: str) -> int:
+def calcola_eta(data_nascita) -> int:
     try:
-        nasc = datetime.strptime(str(data_nascita), "%Y-%m-%d").date()
+        if isinstance(data_nascita, str):
+            nasc = datetime.strptime(data_nascita, "%Y-%m-%d").date()
+        else:
+            nasc = data_nascita
         oggi = date.today()
         return oggi.year - nasc.year - ((oggi.month, oggi.day) < (nasc.month, nasc.day))
     except:
@@ -117,11 +125,14 @@ def calcola_eta(data_nascita: str) -> int:
 def get_interessi_utente(user_id: int) -> list:
     try:
         conn = get_db()
-        rows = conn.execute("""
+        cur = conn.cursor()
+        cur.execute("""
             SELECT i.nome FROM user_interests ui
             JOIN interests i ON i.id = ui.interest_id
-            WHERE ui.user_id = ?
-        """, (user_id,)).fetchall()
+            WHERE ui.user_id = %s
+        """, (user_id,))
+        rows = cur.fetchall()
+        cur.close()
         conn.close()
         return [r["nome"] for r in rows]
     except:
@@ -137,6 +148,8 @@ async def websocket_endpoint(websocket: WebSocket, user_id: int):
     except WebSocketDisconnect:
         manager.disconnect(user_id, websocket)
 
+
+# ============== ROUTES ==============
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
@@ -165,27 +178,28 @@ async def register(
     citta: str = Form(""),
 ):
     conn = get_db()
+    cur = conn.cursor()
     try:
         hashed = hash_password(password)
-        cursor = conn.execute("""
+        cur.execute("""
             INSERT INTO users (email, password_hash, username, nome, data_nascita,
                                genere, orientamento, bio, citta)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
         """, (email, hashed, username, nome, data_nascita, genere, orientamento, bio or None, citta or None))
-        user_id = cursor.lastrowid
-        conn.execute("INSERT INTO user_preferences (user_id) VALUES (?)", (user_id,))
+        user_id = cur.fetchone()["id"]
+        cur.execute("INSERT INTO user_preferences (user_id) VALUES (%s)", (user_id,))
         conn.commit()
-        
         request.session["user_id"] = user_id
-        request.session["logged_in"] = True
-        
         return RedirectResponse("/discover", status_code=303)
-    except sqlite3.IntegrityError:
+    except psycopg2.IntegrityError:
+        conn.rollback()
         return templates.TemplateResponse("register.html", {
             "request": request,
             "error": "Email o username già in uso"
         })
     finally:
+        cur.close()
         conn.close()
 
 
@@ -197,41 +211,38 @@ async def login_page(request: Request):
 @app.post("/login")
 async def login(request: Request, email: str = Form(...), password: str = Form(...)):
     conn = get_db()
+    cur = conn.cursor()
     try:
-        user = conn.execute(
-            "SELECT * FROM users WHERE email = ? AND stato = 'attivo'", (email,)
-        ).fetchone()
-        
+        cur.execute("SELECT * FROM users WHERE email = %s AND stato = 'attivo'", (email,))
+        user = cur.fetchone()
+
         if not user:
             return templates.TemplateResponse("login.html", {
                 "request": request,
                 "error": "Email non trovata. Registrati prima."
             })
-        
+
         if not verify_password(password, user["password_hash"]):
             return templates.TemplateResponse("login.html", {
                 "request": request,
                 "error": "Password non corretta"
             })
-        
-        # Login riuscito
+
         request.session.clear()
         request.session["user_id"] = user["id"]
-        request.session["logged_in"] = True
-        
+
         try:
-            conn.execute(
-                "UPDATE users SET is_online = 1, ultimo_accesso = CURRENT_TIMESTAMP WHERE id = ?",
+            cur.execute(
+                "UPDATE users SET is_online = 1, ultimo_accesso = CURRENT_TIMESTAMP WHERE id = %s",
                 (user["id"],)
             )
             conn.commit()
         except:
             pass
-        
-        response = RedirectResponse("/discover", status_code=303)
-        return response
-        
+
+        return RedirectResponse("/discover", status_code=303)
     finally:
+        cur.close()
         conn.close()
 
 
@@ -241,8 +252,10 @@ async def logout(request: Request):
     if user_id:
         try:
             conn = get_db()
-            conn.execute("UPDATE users SET is_online = 0 WHERE id = ?", (user_id,))
+            cur = conn.cursor()
+            cur.execute("UPDATE users SET is_online = 0 WHERE id = %s", (user_id,))
             conn.commit()
+            cur.close()
             conn.close()
         except:
             pass
@@ -257,16 +270,18 @@ async def discover(request: Request):
         return RedirectResponse("/login", status_code=303)
 
     conn = get_db()
-    candidates = conn.execute("""
+    cur = conn.cursor()
+    cur.execute("""
         SELECT u.* FROM users u
-        WHERE u.id != ?
+        WHERE u.id != %s
           AND u.stato = 'attivo'
-          AND u.id NOT IN (SELECT to_user_id FROM swipes WHERE from_user_id = ?)
-          AND u.id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = ?)
-          AND u.id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = ?)
+          AND u.id NOT IN (SELECT to_user_id FROM swipes WHERE from_user_id = %s)
+          AND u.id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = %s)
+          AND u.id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = %s)
         ORDER BY RANDOM()
         LIMIT 1
-    """, (user["id"], user["id"], user["id"], user["id"])).fetchone()
+    """, (user["id"], user["id"], user["id"], user["id"]))
+    candidates = cur.fetchone()
 
     if candidates:
         candidate = dict(candidates)
@@ -275,6 +290,7 @@ async def discover(request: Request):
     else:
         candidate = None
 
+    cur.close()
     conn.close()
     return templates.TemplateResponse("discover.html", {
         "request": request,
@@ -293,41 +309,46 @@ async def do_swipe(request: Request, to_user_id: int = Form(...), tipo: str = Fo
         return RedirectResponse("/discover", status_code=303)
 
     conn = get_db()
+    cur = conn.cursor()
     match_created = False
 
     try:
-        conn.execute(
-            "INSERT INTO swipes (from_user_id, to_user_id, tipo) VALUES (?, ?, ?)",
+        cur.execute(
+            "INSERT INTO swipes (from_user_id, to_user_id, tipo) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
             (user["id"], to_user_id, tipo)
         )
 
         if tipo in ("like", "superlike"):
-            reciproco = conn.execute("""
+            cur.execute("""
                 SELECT id FROM swipes
-                WHERE from_user_id = ? AND to_user_id = ?
+                WHERE from_user_id = %s AND to_user_id = %s
                   AND tipo IN ('like', 'superlike')
-            """, (to_user_id, user["id"])).fetchone()
+            """, (to_user_id, user["id"]))
+            reciproco = cur.fetchone()
 
             if reciproco:
                 u1, u2 = sorted([user["id"], to_user_id])
-                cursor = conn.execute(
-                    "INSERT OR IGNORE INTO matches (user1_id, user2_id) VALUES (?, ?)",
+                cur.execute(
+                    "INSERT INTO matches (user1_id, user2_id) VALUES (%s, %s) ON CONFLICT DO NOTHING RETURNING id",
                     (u1, u2)
                 )
-                if cursor.rowcount > 0:
-                    match_id = cursor.lastrowid
-                    conn.execute("INSERT INTO conversations (match_id) VALUES (?)", (match_id,))
+                row = cur.fetchone()
+                if row:
+                    match_id = row["id"]
+                    cur.execute("INSERT INTO conversations (match_id) VALUES (%s)", (match_id,))
                     for uid in (user["id"], to_user_id):
-                        conn.execute("""
+                        cur.execute("""
                             INSERT INTO notifications (user_id, tipo, titolo, contenuto, related_id)
-                            VALUES (?, 'nuovo_match', 'Nuovo Match!', 'Hai un nuovo match!', ?)
+                            VALUES (%s, 'nuovo_match', 'Nuovo Match!', 'Hai un nuovo match!', %s)
                         """, (uid, match_id))
                     match_created = True
 
         conn.commit()
-    except sqlite3.IntegrityError:
-        pass
+    except Exception as e:
+        conn.rollback()
+        print(f"Errore swipe: {e}")
     finally:
+        cur.close()
         conn.close()
 
     if match_created:
@@ -342,7 +363,7 @@ async def do_swipe(request: Request, to_user_id: int = Form(...), tipo: str = Fo
             "message": "Hai un nuovo match!"
         })
         return RedirectResponse("/matches?new_match=1", status_code=303)
-    
+
     return RedirectResponse("/discover", status_code=303)
 
 
@@ -353,30 +374,33 @@ async def matches_page(request: Request):
         return RedirectResponse("/login", status_code=303)
 
     conn = get_db()
-    matches = conn.execute("""
+    cur = conn.cursor()
+    cur.execute("""
         SELECT m.id as match_id, m.data_match,
-               CASE WHEN m.user1_id = ? THEN m.user2_id ELSE m.user1_id END as altro_id,
+               CASE WHEN m.user1_id = %s THEN m.user2_id ELSE m.user1_id END as altro_id,
                u.username, u.nome, u.foto_principale_url, u.is_online,
                c.id as conversation_id
         FROM matches m
-        JOIN users u ON u.id = CASE WHEN m.user1_id = ? THEN m.user2_id ELSE m.user1_id END
+        JOIN users u ON u.id = CASE WHEN m.user1_id = %s THEN m.user2_id ELSE m.user1_id END
         LEFT JOIN conversations c ON c.match_id = m.id
-        WHERE (m.user1_id = ? OR m.user2_id = ?) AND m.attivo = 1
+        WHERE (m.user1_id = %s OR m.user2_id = %s) AND m.attivo = 1
         ORDER BY m.data_match DESC
-    """, (user["id"], user["id"], user["id"], user["id"])).fetchall()
+    """, (user["id"], user["id"], user["id"], user["id"]))
+    matches = cur.fetchall()
 
     match_list = []
     for m in matches:
         d = dict(m)
         try:
-            d["eta"] = calcola_eta(
-                conn.execute("SELECT data_nascita FROM users WHERE id = ?", (d["altro_id"],)).fetchone()["data_nascita"]
-            )
+            cur.execute("SELECT data_nascita FROM users WHERE id = %s", (d["altro_id"],))
+            row = cur.fetchone()
+            d["eta"] = calcola_eta(row["data_nascita"]) if row else 0
         except:
             d["eta"] = 0
         match_list.append(d)
 
     new_match = request.query_params.get("new_match")
+    cur.close()
     conn.close()
 
     return templates.TemplateResponse("matches.html", {
@@ -394,33 +418,39 @@ async def chat_page(request: Request, conversation_id: int):
         return RedirectResponse("/login", status_code=303)
 
     conn = get_db()
-    conv = conn.execute("""
+    cur = conn.cursor()
+    cur.execute("""
         SELECT c.id, m.user1_id, m.user2_id
         FROM conversations c
         JOIN matches m ON m.id = c.match_id
-        WHERE c.id = ?
-    """, (conversation_id,)).fetchone()
+        WHERE c.id = %s
+    """, (conversation_id,))
+    conv = cur.fetchone()
 
     if not conv or user["id"] not in (conv["user1_id"], conv["user2_id"]):
+        cur.close()
         conn.close()
         return RedirectResponse("/matches", status_code=303)
 
     altro_id = conv["user2_id"] if user["id"] == conv["user1_id"] else conv["user1_id"]
-    altro = dict(conn.execute("SELECT * FROM users WHERE id = ?", (altro_id,)).fetchone())
+    cur.execute("SELECT * FROM users WHERE id = %s", (altro_id,))
+    altro = dict(cur.fetchone())
     altro["eta"] = calcola_eta(altro["data_nascita"])
 
-    messaggi = conn.execute("""
+    cur.execute("""
         SELECT m.*, u.nome FROM messages m
         JOIN users u ON u.id = m.sender_id
-        WHERE m.conversation_id = ? AND m.eliminato = 0
+        WHERE m.conversation_id = %s AND m.eliminato = 0
         ORDER BY m.data_invio
-    """, (conversation_id,)).fetchall()
+    """, (conversation_id,))
+    messaggi = cur.fetchall()
 
-    conn.execute(
-        "UPDATE messages SET letto = 1 WHERE conversation_id = ? AND sender_id != ? AND letto = 0",
+    cur.execute(
+        "UPDATE messages SET letto = 1 WHERE conversation_id = %s AND sender_id != %s AND letto = 0",
         (conversation_id, user["id"])
     )
     conn.commit()
+    cur.close()
     conn.close()
 
     return templates.TemplateResponse("chat.html", {
@@ -439,30 +469,34 @@ async def send_message(request: Request, conversation_id: int, contenuto: str = 
         return RedirectResponse("/login", status_code=303)
 
     conn = get_db()
-    conv = conn.execute("""
+    cur = conn.cursor()
+    cur.execute("""
         SELECT c.id, m.user1_id, m.user2_id FROM conversations c
-        JOIN matches m ON m.id = c.match_id WHERE c.id = ?
-    """, (conversation_id,)).fetchone()
+        JOIN matches m ON m.id = c.match_id WHERE c.id = %s
+    """, (conversation_id,))
+    conv = cur.fetchone()
 
     if not conv or user["id"] not in (conv["user1_id"], conv["user2_id"]):
+        cur.close()
         conn.close()
         return RedirectResponse("/matches", status_code=303)
 
-    conn.execute(
-        "INSERT INTO messages (conversation_id, sender_id, tipo, contenuto) VALUES (?, ?, 'testo', ?)",
+    cur.execute(
+        "INSERT INTO messages (conversation_id, sender_id, tipo, contenuto) VALUES (%s, %s, 'testo', %s)",
         (conversation_id, user["id"], contenuto)
     )
-    conn.execute(
-        "UPDATE conversations SET ultimo_messaggio_at = CURRENT_TIMESTAMP WHERE id = ?",
+    cur.execute(
+        "UPDATE conversations SET ultimo_messaggio_at = CURRENT_TIMESTAMP WHERE id = %s",
         (conversation_id,)
     )
 
     altro_id = conv["user2_id"] if user["id"] == conv["user1_id"] else conv["user1_id"]
-    conn.execute("""
+    cur.execute("""
         INSERT INTO notifications (user_id, tipo, titolo, contenuto, related_id)
-        VALUES (?, 'nuovo_messaggio', 'Nuovo messaggio', ?, ?)
+        VALUES (%s, 'nuovo_messaggio', 'Nuovo messaggio', %s, %s)
     """, (altro_id, contenuto[:80], conversation_id))
     conn.commit()
+    cur.close()
     conn.close()
 
     await manager.send_to_user(altro_id, {
@@ -485,8 +519,12 @@ async def profile_page(request: Request):
     interessi = get_interessi_utente(user["id"])
 
     conn = get_db()
-    all_interests = conn.execute("SELECT * FROM interests ORDER BY nome").fetchall()
-    prefs = conn.execute("SELECT * FROM user_preferences WHERE user_id = ?", (user["id"],)).fetchone()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM interests ORDER BY nome")
+    all_interests = cur.fetchall()
+    cur.execute("SELECT * FROM user_preferences WHERE user_id = %s", (user["id"],))
+    prefs = cur.fetchone()
+    cur.close()
     conn.close()
 
     return templates.TemplateResponse("profile.html", {
@@ -513,11 +551,13 @@ async def update_profile(
         return RedirectResponse("/login", status_code=303)
 
     conn = get_db()
-    conn.execute("""
-        UPDATE users SET bio = ?, citta = ?, altezza = ?, fuma = ?, beve = ?, cerca = ?
-        WHERE id = ?
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE users SET bio = %s, citta = %s, altezza = %s, fuma = %s, beve = %s, cerca = %s
+        WHERE id = %s
     """, (bio or None, citta or None, altezza, fuma or None, beve or None, cerca or None, user["id"]))
     conn.commit()
+    cur.close()
     conn.close()
     return RedirectResponse("/profile", status_code=303)
 
@@ -532,16 +572,18 @@ async def update_interessi(request: Request):
     selected = form.getlist("interessi")
 
     conn = get_db()
-    conn.execute("DELETE FROM user_interests WHERE user_id = ?", (user["id"],))
+    cur = conn.cursor()
+    cur.execute("DELETE FROM user_interests WHERE user_id = %s", (user["id"],))
     for iid in selected:
         try:
-            conn.execute(
-                "INSERT INTO user_interests (user_id, interest_id) VALUES (?, ?)",
+            cur.execute(
+                "INSERT INTO user_interests (user_id, interest_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                 (user["id"], int(iid))
             )
         except:
             pass
     conn.commit()
+    cur.close()
     conn.close()
     return RedirectResponse("/profile", status_code=303)
 
@@ -553,12 +595,15 @@ async def notifications_page(request: Request):
         return RedirectResponse("/login", status_code=303)
 
     conn = get_db()
-    notifs = conn.execute("""
-        SELECT * FROM notifications WHERE user_id = ?
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT * FROM notifications WHERE user_id = %s
         ORDER BY data_creazione DESC LIMIT 50
-    """, (user["id"],)).fetchall()
-    conn.execute("UPDATE notifications SET letto = 1 WHERE user_id = ?", (user["id"],))
+    """, (user["id"],))
+    notifs = cur.fetchall()
+    cur.execute("UPDATE notifications SET letto = 1 WHERE user_id = %s", (user["id"],))
     conn.commit()
+    cur.close()
     conn.close()
 
     return templates.TemplateResponse("notifications.html", {

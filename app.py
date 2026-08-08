@@ -705,6 +705,7 @@ async def admin_panel(req: Request):
     user = require_admin(req)
     if not user:
         return RedirectResponse("/login", 303)
+    q = (req.query_params.get("q") or "").strip()
     c = db()
     cur = c.cursor()
     cur.execute("SELECT COUNT(*) as c FROM users")
@@ -715,22 +716,67 @@ async def admin_panel(req: Request):
     messages_count = cur.fetchone()["c"]
     cur.execute("SELECT COUNT(*) as c FROM users WHERE is_online=1")
     online_count = cur.fetchone()["c"]
-    cur.execute("SELECT id, nome, username, email, stato, is_admin, latitude, longitude FROM users ORDER BY id DESC LIMIT 100")
+
+    if q:
+        cur.execute("""
+            SELECT id, nome, username, email, stato, is_admin, is_online, latitude, longitude
+            FROM users
+            WHERE nome ILIKE %s OR username ILIKE %s OR email ILIKE %s
+            ORDER BY id DESC LIMIT 100
+        """, (f"%{q}%", f"%{q}%", f"%{q}%"))
+    else:
+        cur.execute("""
+            SELECT id, nome, username, email, stato, is_admin, is_online, latitude, longitude
+            FROM users ORDER BY id DESC LIMIT 100
+        """)
     users = cur.fetchall()
-    cur.execute("""SELECT m.data_match, u1.nome as nome1, u2.nome as nome2
-                   FROM matches m
-                   JOIN users u1 ON u1.id = m.user1_id
-                   JOIN users u2 ON u2.id = m.user2_id
-                   ORDER BY m.data_match DESC LIMIT 20""")
+
+    cur.execute("SELECT id, nome, username FROM users WHERE is_online=1 AND stato='attivo' ORDER BY nome LIMIT 50")
+    online_users = cur.fetchall()
+
+    cur.execute("""
+        SELECT m.data_match, u1.nome as nome1, u2.nome as nome2
+        FROM matches m
+        JOIN users u1 ON u1.id = m.user1_id
+        JOIN users u2 ON u2.id = m.user2_id
+        ORDER BY m.data_match DESC LIMIT 20
+    """)
     matches = cur.fetchall()
+
+    # recent messages with sender and other party
+    recent_messages = []
+    try:
+        cur.execute("""
+            SELECT msg.contenuto, msg.data_invio,
+                   us.nome as sender_nome,
+                   CASE WHEN mt.user1_id = msg.sender_id THEN u2.nome ELSE u1.nome END as receiver_nome
+            FROM messages msg
+            JOIN conversations conv ON conv.id = msg.conversation_id
+            JOIN matches mt ON mt.id = conv.match_id
+            JOIN users us ON us.id = msg.sender_id
+            JOIN users u1 ON u1.id = mt.user1_id
+            JOIN users u2 ON u2.id = mt.user2_id
+            WHERE msg.eliminato = 0
+            ORDER BY msg.data_invio DESC
+            LIMIT 30
+        """)
+        recent_messages = cur.fetchall()
+    except Exception as e:
+        print("recent messages error:", e)
+
     cur.close()
     c.close()
     return templates.TemplateResponse("admin.html", {
-        "request": req, "user": user,
+        "request": req,
+        "user": user,
+        "q": q,
         "stats": {"users": users_count, "matches": matches_count, "messages": messages_count, "online": online_count},
         "users": [dict(u) for u in users],
-        "matches": [dict(m) for m in matches]
+        "online_users": [dict(o) for o in online_users],
+        "matches": [dict(m) for m in matches],
+        "recent_messages": [dict(m) for m in recent_messages],
     })
+
 
 @app.post("/admin/ban/{user_id}")
 async def admin_ban(req: Request, user_id: int):
@@ -767,3 +813,32 @@ async def admin_delete(req: Request, user_id: int):
     cur.close()
     c.close()
     return RedirectResponse("/admin", 303)
+
+@app.post("/admin/make_admin/{user_id}")
+async def admin_make_admin(req: Request, user_id: int):
+    if not require_admin(req):
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    cur.execute("UPDATE users SET is_admin=1 WHERE id=%s", (user_id,))
+    c.commit()
+    cur.close()
+    c.close()
+    return RedirectResponse("/admin", 303)
+
+
+@app.post("/admin/remove_admin/{user_id}")
+async def admin_remove_admin(req: Request, user_id: int):
+    admin = require_admin(req)
+    if not admin:
+        return RedirectResponse("/login", 303)
+    if user_id == admin["id"]:
+        return RedirectResponse("/admin", 303)
+    c = db()
+    cur = c.cursor()
+    cur.execute("UPDATE users SET is_admin=0 WHERE id=%s", (user_id,))
+    c.commit()
+    cur.close()
+    c.close()
+    return RedirectResponse("/admin", 303)
+

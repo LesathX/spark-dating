@@ -3,84 +3,144 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Accedi - Spark</title>
+    <title>MyCheating – Trova chi cerchi</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        .btn-primary {
-            background: linear-gradient(135deg, #f43f5e, #e11d48);
+        body {
+            background-color: #0a0a0a;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        .btn-red {
+            background: #e11d48;
+        }
+        .btn-red:hover {
+            background: #be123c;
+        }
+        .text-red-custom {
+            color: #e11d48;
+        }
+        .border-red-custom {
+            border-color: #e11d48;
         }
     </style>
 </head>
-<body class="bg-gray-50 min-h-screen flex items-center justify-center p-4">
-    <div class="max-w-md w-full bg-white rounded-2xl shadow-lg p-8">
-        <div class="text-center mb-8">
-            <div class="text-4xl mb-3">💘</div>
-            <h1 class="text-2xl font-bold text-gray-900">Bentornato</h1>
-            <p class="text-gray-500 text-sm mt-1">Accedi al tuo account</p>
+<body class="text-white min-h-screen">
+
+    <!-- Navbar -->
+    <nav class="flex items-center justify-between px-6 py-4 border-b border-white/10">
+        <div class="flex items-center gap-2 font-bold text-lg tracking-wide">
+            <span class="text-red-500 text-xl">🔥</span>
+            MY CHEATING
+        </div>
+        <a href="/login" class="border border-red-500 text-red-500 text-sm font-semibold px-5 py-2 rounded hover:bg-red-500 hover:text-white transition">
+            ACCEDI
+        </a>
+    </nav>
+
+    <!-- Hero -->
+    <section class="max-w-6xl mx-auto px-6 py-16 md:py-24 grid md:grid-cols-2 gap-12 items-center">
+        <!-- Testo a sinistra -->
+        <div>
+            <p class="text-red-500 text-sm font-medium tracking-widest mb-4">— INCONTRI REALI</p>
+            <h1 class="text-5xl md:text-6xl font-extrabold leading-tight mb-6">
+                TROVA<br>
+                CHI<br>
+                <span class="text-red-500">CERCHI</span>
+            </h1>
+            <p class="text-gray-400 text-lg mb-8 max-w-md leading-relaxed">
+                La piattaforma più diretta per incontrare persone reali vicino a te. Profili verificati, chat privata, galleria personale.
+            </p>
+            <div class="flex flex-wrap gap-4">
+                <a href="/register" class="btn-red text-white font-semibold px-8 py-3.5 rounded flex items-center gap-2">
+                    REGISTRATI GRATIS →
+                </a>
+                <a href="/login" class="border border-white/20 text-white font-semibold px-8 py-3.5 rounded hover:bg-white/5 transition">
+                    ACCEDI
+                </a>
+            </div>
         </div>
 
-        {% if error %}
-        <div class="bg-red-50 text-red-600 px-4 py-3 rounded-xl mb-5 text-sm">
-            {{ error }}
+        <!-- Card a destra -->
+        <div class="relative">
+            <div class="rounded-xl overflow-hidden border border-white/10 shadow-2xl shadow-red-900/20">
+                <div class="aspect-[4/3] bg-gradient-to-br from-red-900/60 to-black flex items-center justify-center relative">
+                    <div class="absolute top-4 right-4 bg-red-600 text-white text-xs font-bold px-3 py-1 rounded">
+                        LIVE
+                    </div>
+                    <div class="text-center p-6">
+                        <div class="text-6xl mb-4">🔥</div>
+                        <div class="text-xl font-bold">IT'S A MATCH</div>
+                        <div class="text-gray-400 text-sm mt-1">Inizia a scrivere.</div>
+                    </div>
+                </div>
+            </div>
         </div>
-        {% endif %}
+    </section>
 
-        <form method="post" action="/login" class="space-y-4">
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                <input type="email" name="email" required
-                       class="w-full border border-gray-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-rose-400"
-                       placeholder="tua@email.com">
+    <!-- Stats -->
+    <section class="border-y border-white/10">
+        <div class="max-w-6xl mx-auto grid grid-cols-3 text-center">
+            <div class="py-8 border-r border-white/10">
+                <div class="text-3xl font-bold text-red-500">100%</div>
+                <div class="text-xs text-gray-500 tracking-widest mt-1">GRATUITO</div>
             </div>
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                <input type="password" name="password" required
-                       class="w-full border border-gray-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-rose-400"
-                       placeholder="••••••••">
+            <div class="py-8 border-r border-white/10">
+                <div class="text-3xl font-bold text-red-500">24H</div>
+                <div class="text-xs text-gray-500 tracking-widest mt-1">STORIE LIVE</div>
             </div>
-            <button type="submit" class="w-full btn-primary text-white font-semibold py-3.5 rounded-xl">
-                Accedi
-            </button>
-        </form>
+            <div class="py-8">
+                <div class="text-3xl font-bold text-red-500">GPS</div>
+                <div class="text-xs text-gray-500 tracking-widest mt-1">NEARBY</div>
+            </div>
+        </div>
+    </section>
 
-        <p class="text-center text-sm text-gray-500 mt-6">
-            Non hai un account? <a href="/register" class="text-rose-500 font-semibold">Registrati</a>
-        </p>
-    </div>
+    <!-- Come funziona -->
+    <section class="max-w-6xl mx-auto px-6 py-20">
+        <h2 class="text-center text-2xl font-bold mb-12 tracking-wide">
+            COME <span class="text-red-500">FUNZIONA</span>
+        </h2>
+
+        <div class="grid md:grid-cols-3 gap-6">
+            <!-- Card 1 -->
+            <div class="bg-white/5 border border-white/10 rounded-xl p-6 hover:border-red-500/50 transition">
+                <div class="w-12 h-12 rounded-lg bg-red-500/20 flex items-center justify-center text-red-500 text-xl mb-4">
+                    📍
+                </div>
+                <h3 class="font-bold text-lg mb-2">VICINO A TE</h3>
+                <p class="text-gray-400 text-sm leading-relaxed">
+                    Persone reali nella tua zona. Geolocalizzazione attiva per trovare chi è più vicino.
+                </p>
+            </div>
+
+            <!-- Card 2 -->
+            <div class="bg-white/5 border border-white/10 rounded-xl p-6 hover:border-red-500/50 transition">
+                <div class="w-12 h-12 rounded-lg bg-red-500/20 flex items-center justify-center text-red-500 text-xl mb-4">
+                    📷
+                </div>
+                <h3 class="font-bold text-lg mb-2">FOTO & STORIE</h3>
+                <p class="text-gray-400 text-sm leading-relaxed">
+                    Profili con galleria pubblica e privata. Storie che scompaiono in 24 ore.
+                </p>
+            </div>
+
+            <!-- Card 3 -->
+            <div class="bg-white/5 border border-white/10 rounded-xl p-6 hover:border-red-500/50 transition">
+                <div class="w-12 h-12 rounded-lg bg-red-500/20 flex items-center justify-center text-red-500 text-xl mb-4">
+                    💬
+                </div>
+                <h3 class="font-bold text-lg mb-2">MATCH & CHAT</h3>
+                <p class="text-gray-400 text-sm leading-relaxed">
+                    Swipe, match e chat privata. Vedi il profilo di chi ti piace e scriviti subito.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="border-t border-white/10 py-8 text-center text-gray-600 text-sm">
+        © 2026 MyCheating — Incontri reali vicino a te
+    </footer>
+
 </body>
-</html>{% extends "base.html" %}
-{% block title %}Spark – Trova il tuo match{% endblock %}
-
-{% block content %}
-<div class="flex flex-col items-center justify-center min-h-[85vh] text-center px-2">
-    <!-- Logo animato -->
-    <div class="relative mb-8">
-        <div class="w-28 h-28 rounded-full bg-gradient-to-br from-spark-400 to-spark-600 flex items-center justify-center shadow-xl shadow-spark-200">
-            <span class="text-5xl">💘</span>
-        </div>
-        <div class="absolute -bottom-1 -right-1 w-8 h-8 bg-green-400 rounded-full border-4 border-white"></div>
-    </div>
-
-    <h1 class="text-4xl font-extrabold text-gray-900 tracking-tight mb-3">
-        Spark
-    </h1>
-    <p class="text-gray-500 text-lg mb-10 max-w-xs leading-relaxed">
-        Scopri persone vicino a te.<br>Fai match. Inizia a chattare.
-    </p>
-
-    <div class="flex flex-col gap-3 w-full max-w-xs">
-        <a href="/register"
-           class="btn-primary text-white font-semibold py-4 rounded-2xl text-center text-lg shadow-lg shadow-spark-200 active:scale-95 transition">
-            Crea account gratis
-        </a>
-        <a href="/login"
-           class="bg-white border-2 border-gray-200 text-gray-700 font-semibold py-4 rounded-2xl text-center hover:border-spark-300 hover:text-spark-600 active:scale-95 transition">
-            Accedi
-        </a>
-    </div>
-
-    <p class="text-xs text-gray-400 mt-12">
-        Continuando accetti i termini di servizio
-    </p>
-</div>
-{% endblock %}
+</html>

@@ -1,31 +1,40 @@
-{% extends "base.html" %}
-{% block title %}Chat con {{ altro.nome }} - Spark{% endblock %}
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat – MyCheating</title>
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0a0a0a; font-family: 'Oswald', sans-serif; }
+        .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
+        .text-red-pure { color: #ff1a1a; }
+    </style>
+</head>
+<body class="text-white min-h-screen flex flex-col">
 
-{% block content %}
-<div class="flex flex-col h-[calc(100vh-9rem)]">
-    <!-- Header -->
-    <div class="flex items-center gap-3 pb-4 border-b border-gray-100 mb-4 -mt-1">
-        <a href="/matches" class="text-gray-400 hover:text-gray-700 p-1">
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
-        </a>
-        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-spark-400 to-orange-400 flex items-center justify-center text-white font-bold text-sm">
+    <!-- Header chat -->
+    <div class="flex items-center gap-3 px-4 py-3 border-b border-white/10">
+        <a href="/matches" class="text-gray-400 text-xl">←</a>
+        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-red-700 to-black flex items-center justify-center font-hot">
             {{ altro.nome[0] | upper }}
         </div>
-        <div class="flex-1">
-            <div class="font-semibold text-gray-900">{{ altro.nome }}, {{ altro.eta }}</div>
-            <div class="text-xs text-gray-400">@{{ altro.username }}</div>
+        <div>
+            <div class="font-hot text-lg tracking-wide">{{ altro.nome }}, {{ altro.eta }}</div>
+            <div class="text-xs text-gray-500">@{{ altro.username }}</div>
         </div>
     </div>
 
     <!-- Messaggi -->
-    <div class="flex-1 overflow-y-auto space-y-3 mb-4 px-1" id="messages">
+    <div class="flex-1 overflow-y-auto px-4 py-4 space-y-3" id="messages">
         {% for msg in messaggi %}
         <div class="flex {% if msg.sender_id == user.id %}justify-end{% else %}justify-start{% endif %}">
-            <div class="max-w-[78%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed
+            <div class="max-w-[75%] px-4 py-2.5 rounded-2xl text-sm
                 {% if msg.sender_id == user.id %}
-                    bg-spark-500 text-white rounded-br-md
+                    bg-[#ff1a1a] text-white rounded-br-md
                 {% else %}
-                    bg-gray-100 text-gray-800 rounded-bl-md
+                    bg-white/10 text-white rounded-bl-md
                 {% endif %}">
                 {{ msg.contenuto }}
                 <div class="text-[10px] mt-1 opacity-60 text-right">
@@ -34,27 +43,26 @@
             </div>
         </div>
         {% else %}
-        <div class="text-center text-gray-400 text-sm py-16">
+        <div class="text-center text-gray-500 py-16">
             <div class="text-3xl mb-2">👋</div>
-            Inizia la conversazione!<br>Di' ciao a {{ altro.nome }}
+            Inizia la conversazione con {{ altro.nome }}
         </div>
         {% endfor %}
     </div>
 
     <!-- Input -->
-    <form method="post" action="/chat/{{ conversation_id }}/send" class="flex gap-2 items-center">
+    <form method="post" action="/chat/{{ conversation_id }}/send" class="p-4 border-t border-white/10 flex gap-2">
         <input type="text" name="contenuto" required placeholder="Scrivi un messaggio..."
-               class="flex-1 border border-gray-200 rounded-full px-5 py-3.5 focus:ring-2 focus:ring-spark-400 focus:border-transparent outline-none text-sm bg-white"
-               autocomplete="off" autofocus>
-        <button type="submit"
-                class="btn-primary text-white w-12 h-12 rounded-full flex items-center justify-center shrink-0 shadow-md active:scale-90 transition">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+               class="flex-1 bg-white/5 border border-white/15 text-white placeholder-gray-500 rounded-full px-5 py-3 text-sm outline-none focus:border-[#ff1a1a]"
+               autocomplete="off">
+        <button type="submit" class="w-12 h-12 rounded-full bg-[#ff1a1a] text-white flex items-center justify-center shrink-0">
+            ➤
         </button>
     </form>
-</div>
 
-<script>
-    const messages = document.getElementById('messages');
-    if (messages) messages.scrollTop = messages.scrollHeight;
-</script>
-{% endblock %}
+    <script>
+        const messages = document.getElementById('messages');
+        if (messages) messages.scrollTop = messages.scrollHeight;
+    </script>
+</body>
+</html>

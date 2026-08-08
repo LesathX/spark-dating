@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-MyCheating - Dating App with Real-time WebSocket notifications
+MyCheating - Dating App
 """
 
 from fastapi import FastAPI, Request, Form, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -15,22 +15,20 @@ from datetime import datetime, date
 from typing import Optional, Dict, List
 import secrets
 import os
-import json
 
-# ============== CONFIG ==============
 BASE_DIR = Path(__file__).parent
 DB_PATH = BASE_DIR / "dating_chat.db"
-SECRET_KEY = os.environ.get("SECRET_KEY", secrets.token_hex(32))
+SECRET_KEY = os.environ.get("SECRET_KEY", "mycheating_secret_key_2026_super_sicura_123456")
 
 app = FastAPI(title="MyCheating")
 
 app.add_middleware(
     SessionMiddleware,
     secret_key=SECRET_KEY,
-    session_cookie="session",
-    max_age=60 * 60 * 24 * 14,
+    session_cookie="mycheating_session",
+    max_age=2592000,
     same_site="lax",
-    https_only=True
+    https_only=False   # importante su Render
 )
 
 static_dir = BASE_DIR / "static"
@@ -41,7 +39,6 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
-# ============== WEBSOCKET MANAGER ==============
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[int, List[WebSocket]] = {}
@@ -74,9 +71,8 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-# ============== DATABASE ==============
 def get_db():
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
@@ -87,7 +83,10 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    try:
+        return pwd_context.verify(plain, hashed)
+    except:
+        return False
 
 
 def get_current_user(request: Request):
@@ -101,13 +100,14 @@ def get_current_user(request: Request):
         ).fetchone()
         conn.close()
         return dict(user) if user else None
-    except:
+    except Exception as e:
+        print(f"Errore get_current_user: {e}")
         return None
 
 
 def calcola_eta(data_nascita: str) -> int:
     try:
-        nasc = datetime.strptime(data_nascita, "%Y-%m-%d").date()
+        nasc = datetime.strptime(str(data_nascita), "%Y-%m-%d").date()
         oggi = date.today()
         return oggi.year - nasc.year - ((oggi.month, oggi.day) < (nasc.month, nasc.day))
     except:
@@ -128,7 +128,6 @@ def get_interessi_utente(user_id: int) -> list:
         return []
 
 
-# ============== WEBSOCKET ROUTE ==============
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: int):
     await manager.connect(user_id, websocket)
@@ -138,8 +137,6 @@ async def websocket_endpoint(websocket: WebSocket, user_id: int):
     except WebSocketDisconnect:
         manager.disconnect(user_id, websocket)
 
-
-# ============== ROUTES ==============
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
@@ -178,7 +175,10 @@ async def register(
         user_id = cursor.lastrowid
         conn.execute("INSERT INTO user_preferences (user_id) VALUES (?)", (user_id,))
         conn.commit()
+        
         request.session["user_id"] = user_id
+        request.session["logged_in"] = True
+        
         return RedirectResponse("/discover", status_code=303)
     except sqlite3.IntegrityError:
         return templates.TemplateResponse("register.html", {
@@ -197,29 +197,42 @@ async def login_page(request: Request):
 @app.post("/login")
 async def login(request: Request, email: str = Form(...), password: str = Form(...)):
     conn = get_db()
-    user = conn.execute(
-        "SELECT * FROM users WHERE email = ? AND stato = 'attivo'", (email,)
-    ).fetchone()
-    conn.close()
-
-    if user and verify_password(password, user["password_hash"]):
+    try:
+        user = conn.execute(
+            "SELECT * FROM users WHERE email = ? AND stato = 'attivo'", (email,)
+        ).fetchone()
+        
+        if not user:
+            return templates.TemplateResponse("login.html", {
+                "request": request,
+                "error": "Email non trovata. Registrati prima."
+            })
+        
+        if not verify_password(password, user["password_hash"]):
+            return templates.TemplateResponse("login.html", {
+                "request": request,
+                "error": "Password non corretta"
+            })
+        
+        # Login riuscito
+        request.session.clear()
         request.session["user_id"] = user["id"]
+        request.session["logged_in"] = True
+        
         try:
-            conn = get_db()
             conn.execute(
                 "UPDATE users SET is_online = 1, ultimo_accesso = CURRENT_TIMESTAMP WHERE id = ?",
                 (user["id"],)
             )
             conn.commit()
-            conn.close()
         except:
             pass
-        return RedirectResponse("/discover", status_code=303)
-
-    return templates.TemplateResponse("login.html", {
-        "request": request,
-        "error": "Email o password non corretti"
-    })
+        
+        response = RedirectResponse("/discover", status_code=303)
+        return response
+        
+    finally:
+        conn.close()
 
 
 @app.get("/logout")
@@ -281,7 +294,6 @@ async def do_swipe(request: Request, to_user_id: int = Form(...), tipo: str = Fo
 
     conn = get_db()
     match_created = False
-    match_id = None
 
     try:
         conn.execute(
@@ -329,9 +341,8 @@ async def do_swipe(request: Request, to_user_id: int = Form(...), tipo: str = Fo
             "title": "Nuovo Match! 🎉",
             "message": "Hai un nuovo match!"
         })
-
-    if match_created:
         return RedirectResponse("/matches?new_match=1", status_code=303)
+    
     return RedirectResponse("/discover", status_code=303)
 
 

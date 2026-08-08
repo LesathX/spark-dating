@@ -113,5 +113,80 @@
             </a>
         </div>
     </nav>
+    <script>
+(function() {
+    // Prendi l'ID utente dalla pagina (lo passiamo dal backend)
+    const userId = {{ user.id if user else 'null' }};
+    
+    if (!userId) return;
+
+    let ws;
+    let reconnectTimeout;
+
+    function connect() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/${userId}`;
+        
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = function() {
+            console.log('WebSocket connesso');
+        };
+
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            
+            // Mostra notifica
+            showNotification(data.title || 'Nuova notifica', data.message || '');
+            
+            // Se è un nuovo messaggio e siamo in chat, potremmo aggiornare
+            if (data.type === 'nuovo_match') {
+                // Opzionale: ricarica la pagina match dopo 1 secondo
+                // setTimeout(() => location.href = '/matches', 1500);
+            }
+        };
+
+        ws.onclose = function() {
+            console.log('WebSocket chiuso, riconnessione...');
+            reconnectTimeout = setTimeout(connect, 3000);
+        };
+
+        ws.onerror = function() {
+            ws.close();
+        };
+    }
+
+    function showNotification(title, message) {
+        // Crea un toast in alto
+        const toast = document.createElement('div');
+        toast.style.cssText = `
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #ff1a1a;
+            color: white;
+            padding: 14px 24px;
+            border-radius: 12px;
+            font-family: 'Oswald', sans-serif;
+            font-size: 15px;
+            z-index: 9999;
+            box-shadow: 0 8px 30px rgba(255,26,26,0.4);
+            text-align: center;
+            max-width: 90%;
+        `;
+        toast.innerHTML = `<strong>${title}</strong><br><span style="font-size:13px;opacity:0.9">${message}</span>`;
+        document.body.appendChild(toast);
+
+        setTimeout(() => {
+            toast.style.transition = 'opacity 0.4s';
+            toast.style.opacity = '0';
+            setTimeout(() => toast.remove(), 400);
+        }, 4000);
+    }
+
+    connect();
+})();
+</script>
 </body>
 </html>

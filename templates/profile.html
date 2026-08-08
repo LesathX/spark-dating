@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Il tuo profilo - Spark{% endblock %}
+
+{% block content %}
+<div class="bg-white rounded-3xl card-shadow p-6 mb-6">
+    <div class="flex items-center gap-4 mb-2">
+        <div class="w-20 h-20 rounded-full bg-gradient-to-br from-spark-400 to-orange-400 flex items-center justify-center text-white text-3xl font-bold">
+            {{ user.nome[0] | upper }}
+        </div>
+        <div>
+            <div class="text-2xl font-bold text-gray-900">{{ user.nome }}, {{ user.eta }}</div>
+            <div class="text-gray-500">@{{ user.username }}</div>
+            {% if user.citta %}<div class="text-sm text-gray-400 mt-0.5">📍 {{ user.citta }}</div>{% endif %}
+        </div>
+    </div>
+</div>
+
+<form method="post" action="/profile/update" class="bg-white rounded-3xl card-shadow p-6 mb-6 space-y-4">
+    <h2 class="font-bold text-gray-900 text-lg">Informazioni</h2>
+    
+    <div>
+        <label class="block text-sm font-medium text-gray-600 mb-1.5">Bio</label>
+        <textarea name="bio" rows="3" class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-spark-400">{{ user.bio or '' }}</textarea>
+    </div>
+    <div>
+        <label class="block text-sm font-medium text-gray-600 mb-1.5">Città</label>
+        <input type="text" name="citta" value="{{ user.citta or '' }}" class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-spark-400">
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+        <div>
+            <label class="block text-sm font-medium text-gray-600 mb-1.5">Altezza (cm)</label>
+            <input type="number" name="altezza" value="{{ user.altezza or '' }}" class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-spark-400">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-600 mb-1.5">Cerca</label>
+            <select name="cerca" class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-spark-400 bg-white">
+                <option value="">-</option>
+                <option value="relazione seria" {% if user.cerca == 'relazione seria' %}selected{% endif %}>Relazione seria</option>
+                <option value="casual" {% if user.cerca == 'casual' %}selected{% endif %}>Casual</option>
+                <option value="amicizia" {% if user.cerca == 'amicizia' %}selected{% endif %}>Amicizia</option>
+                <option value="altro" {% if user.cerca == 'altro' %}selected{% endif %}>Altro</option>
+            </select>
+        </div>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+        <div>
+            <label class="block text-sm font-medium text-gray-600 mb-1.5">Fuma</label>
+            <select name="fuma" class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none bg-white">
+                <option value="">-</option>
+                <option value="si" {% if user.fuma == 'si' %}selected{% endif %}>Sì</option>
+                <option value="no" {% if user.fuma == 'no' %}selected{% endif %}>No</option>
+                <option value="a volte" {% if user.fuma == 'a volte' %}selected{% endif %}>A volte</option>
+            </select>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-600 mb-1.5">Beve</label>
+            <select name="beve" class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none bg-white">
+                <option value="">-</option>
+                <option value="si" {% if user.beve == 'si' %}selected{% endif %}>Sì</option>
+                <option value="no" {% if user.beve == 'no' %}selected{% endif %}>No</option>
+                <option value="a volte" {% if user.beve == 'a volte' %}selected{% endif %}>A volte</option>
+            </select>
+        </div>
+    </div>
+
+    <button type="submit" class="w-full btn-primary text-white font-semibold py-3.5 rounded-xl shadow-md">
+        Salva modifiche
+    </button>
+</form>
+
+<form method="post" action="/profile/interessi" class="bg-white rounded-3xl card-shadow p-6 mb-6">
+    <h2 class="font-bold text-gray-900 text-lg mb-4">I tuoi interessi</h2>
+    <div class="flex flex-wrap gap-2 mb-5">
+        {% for i in all_interests %}
+        <label class="cursor-pointer">
+            <input type="checkbox" name="interessi" value="{{ i.id }}" class="peer sr-only"
+                   {% if i.nome in interessi %}checked{% endif %}>
+            <span class="inline-block px-3.5 py-1.5 rounded-full text-sm font-medium border transition
+                         peer-checked:bg-spark-500 peer-checked:text-white peer-checked:border-spark-500
+                         bg-gray-50 text-gray-600 border-gray-200 hover:border-spark-300">
+                {{ i.nome }}
+            </span>
+        </label>
+        {% endfor %}
+    </div>
+    <button type="submit" class="w-full bg-gray-900 text-white font-semibold py-3.5 rounded-xl">
+        Aggiorna interessi
+    </button>
+</form>
+
+<div class="text-center pt-2">
+    <a href="/logout" class="text-red-500 text-sm font-medium hover:underline">Esci dall’account</a>
+</div>
+{% endblock %}

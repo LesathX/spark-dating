@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Spark – Trova il tuo match{% endblock %}
+
+{% block content %}
+<div class="flex flex-col items-center justify-center min-h-[85vh] text-center px-2">
+    <!-- Logo animato -->
+    <div class="relative mb-8">
+        <div class="w-28 h-28 rounded-full bg-gradient-to-br from-spark-400 to-spark-600 flex items-center justify-center shadow-xl shadow-spark-200">
+            <span class="text-5xl">💘</span>
+        </div>
+        <div class="absolute -bottom-1 -right-1 w-8 h-8 bg-green-400 rounded-full border-4 border-white"></div>
+    </div>
+
+    <h1 class="text-4xl font-extrabold text-gray-900 tracking-tight mb-3">
+        Spark
+    </h1>
+    <p class="text-gray-500 text-lg mb-10 max-w-xs leading-relaxed">
+        Scopri persone vicino a te.<br>Fai match. Inizia a chattare.
+    </p>
+
+    <div class="flex flex-col gap-3 w-full max-w-xs">
+        <a href="/register"
+           class="btn-primary text-white font-semibold py-4 rounded-2xl text-center text-lg shadow-lg shadow-spark-200 active:scale-95 transition">
+            Crea account gratis
+        </a>
+        <a href="/login"
+           class="bg-white border-2 border-gray-200 text-gray-700 font-semibold py-4 rounded-2xl text-center hover:border-spark-300 hover:text-spark-600 active:scale-95 transition">
+            Accedi
+        </a>
+    </div>
+
+    <p class="text-xs text-gray-400 mt-12">
+        Continuando accetti i termini di servizio
+    </p>
+</div>
+{% endblock %}

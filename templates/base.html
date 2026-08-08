@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>{% block title %}Spark – Dating Chat{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        spark: {
+                            50:  '#fff1f2',
+                            100: '#ffe4e6',
+                            400: '#fb7185',
+                            500: '#f43f5e',
+                            600: '#e11d48',
+                            700: '#be123c',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .card-shadow {
+            box-shadow: 0 8px 30px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04);
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #f43f5e, #e11d48);
+        }
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #e11d48, #be123c);
+        }
+        .btn-like {
+            background: linear-gradient(135deg, #22c55e, #16a34a);
+        }
+        .btn-dislike {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+        }
+        .btn-super {
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+        }
+        /* Bottom nav safe area */
+        .bottom-nav {
+            padding-bottom: env(safe-area-inset-bottom, 0);
+        }
+        /* Smooth scroll */
+        html { scroll-behavior: smooth; }
+    </style>
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="bg-gray-50 min-h-screen pb-24">
+    {% if user %}
+    <!-- Top bar minimal -->
+    <header class="bg-white/80 backdrop-blur-md border-b border-gray-100 sticky top-0 z-40">
+        <div class="max-w-lg mx-auto px-4 h-14 flex items-center justify-between">
+            <a href="/discover" class="text-xl font-bold tracking-tight">
+                <span class="text-spark-500">Spark</span>
+            </a>
+            <a href="/notifications" class="relative p-2 text-gray-500 hover:text-spark-500 transition">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                </svg>
+            </a>
+        </div>
+    </header>
+    {% endif %}
+
+    <main class="max-w-lg mx-auto px-4 py-5">
+        {% block content %}{% endblock %}
+    </main>
+
+    {% if user %}
+    <!-- Bottom Navigation (mobile-first, stile app) -->
+    <nav class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 bottom-nav z-50">
+        <div class="max-w-lg mx-auto grid grid-cols-4 h-16">
+            <a href="/discover" class="flex flex-col items-center justify-center gap-0.5 text-xs font-medium
+                {% if request.url.path == '/discover' %}text-spark-500{% else %}text-gray-400 hover:text-gray-600{% endif %}">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                Scopri
+            </a>
+            <a href="/matches" class="flex flex-col items-center justify-center gap-0.5 text-xs font-medium
+                {% if request.url.path.startswith('/matches') or request.url.path.startswith('/chat') %}text-spark-500{% else %}text-gray-400 hover:text-gray-600{% endif %}">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                </svg>
+                Match
+            </a>
+            <a href="/notifications" class="flex flex-col items-center justify-center gap-0.5 text-xs font-medium
+                {% if request.url.path == '/notifications' %}text-spark-500{% else %}text-gray-400 hover:text-gray-600{% endif %}">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+                Chat
+            </a>
+            <a href="/profile" class="flex flex-col items-center justify-center gap-0.5 text-xs font-medium
+                {% if request.url.path == '/profile' %}text-spark-500{% else %}text-gray-400 hover:text-gray-600{% endif %}">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+                Profilo
+            </a>
+        </div>
+    </nav>
+    {% endif %}
+</body>
+</html>

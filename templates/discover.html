@@ -14,7 +14,6 @@
 </head>
 <body class="text-white min-h-screen pb-24">
 
-    <!-- Top bar -->
     <div class="flex items-center justify-between px-5 py-4 border-b border-white/10">
         <div class="font-hot text-xl tracking-wider flex items-center gap-2">
             <span class="text-red-pure">🔥</span> MY CHEATING
@@ -25,29 +24,19 @@
     <div class="max-w-md mx-auto px-4 py-8">
         {% if candidate %}
         <div class="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
-            <!-- Avatar -->
             <div class="h-80 bg-gradient-to-br from-red-900/40 to-black flex items-center justify-center relative">
-                <div class="text-white text-8xl font-hot opacity-90">
-                    {{ candidate.nome[0] | upper }}
-                </div>
+                <div class="text-white text-8xl font-hot opacity-90">{{ candidate.nome[0] | upper }}</div>
                 {% if candidate.is_online %}
-                <div class="absolute top-4 right-4 bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-full">
-                    ONLINE
-                </div>
+                <div class="absolute top-4 right-4 bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-full">ONLINE</div>
                 {% endif %}
             </div>
-
             <div class="p-6">
                 <div class="flex items-baseline gap-2 mb-1">
                     <h2 class="font-hot text-3xl tracking-wide">{{ candidate.nome }}</h2>
                     <span class="text-gray-400 text-xl">{{ candidate.eta }}</span>
                 </div>
-                {% if candidate.citta %}
-                <p class="text-gray-500 text-sm mb-4">📍 {{ candidate.citta }}</p>
-                {% endif %}
-                {% if candidate.bio %}
-                <p class="text-gray-300 mb-5 leading-relaxed">{{ candidate.bio }}</p>
-                {% endif %}
+                {% if candidate.citta %}<p class="text-gray-500 text-sm mb-4">📍 {{ candidate.citta }}</p>{% endif %}
+                {% if candidate.bio %}<p class="text-gray-300 mb-5 leading-relaxed">{{ candidate.bio }}</p>{% endif %}
                 {% if candidate.interessi %}
                 <div class="flex flex-wrap gap-2 mb-6">
                     {% for i in candidate.interessi %}
@@ -56,34 +45,21 @@
                 </div>
                 {% endif %}
             </div>
-
-            <!-- Pulsanti -->
             <div class="flex justify-center items-center gap-5 pb-8">
-                <!-- Dislike (X rossa) -->
                 <form method="post" action="/swipe">
                     <input type="hidden" name="to_user_id" value="{{ candidate.id }}">
                     <input type="hidden" name="tipo" value="dislike">
-                    <button class="w-16 h-16 rounded-full bg-[#ff1a1a] text-white text-2xl flex items-center justify-center shadow-lg shadow-red-900/40">
-                        ✕
-                    </button>
+                    <button class="w-16 h-16 rounded-full bg-[#ff1a1a] text-white text-2xl flex items-center justify-center">✕</button>
                 </form>
-
-                <!-- Superlike (fiamma) -->
                 <form method="post" action="/swipe">
                     <input type="hidden" name="to_user_id" value="{{ candidate.id }}">
                     <input type="hidden" name="tipo" value="superlike">
-                    <button class="w-14 h-14 rounded-full bg-orange-500 text-white text-xl flex items-center justify-center shadow-lg shadow-orange-900/40">
-                        🔥
-                    </button>
+                    <button class="w-14 h-14 rounded-full bg-orange-500 text-white text-xl flex items-center justify-center">🔥</button>
                 </form>
-
-                <!-- Like (cuore verde) -->
                 <form method="post" action="/swipe">
                     <input type="hidden" name="to_user_id" value="{{ candidate.id }}">
                     <input type="hidden" name="tipo" value="like">
-                    <button class="w-16 h-16 rounded-full bg-[#22c55e] text-white text-2xl flex items-center justify-center shadow-lg shadow-green-900/40">
-                        ♥
-                    </button>
+                    <button class="w-16 h-16 rounded-full bg-[#22c55e] text-white text-2xl flex items-center justify-center">♥</button>
                 </form>
             </div>
         </div>
@@ -96,97 +72,35 @@
         {% endif %}
     </div>
 
-    <!-- Bottom nav -->
     <nav class="fixed bottom-0 left-0 right-0 bg-[#0a0a0a] border-t border-white/10">
         <div class="max-w-md mx-auto grid grid-cols-4 h-16 text-xs">
-            <a href="/discover" class="flex flex-col items-center justify-center text-red-pure">
-                <span class="text-lg">🔥</span> Scopri
-            </a>
-            <a href="/matches" class="flex flex-col items-center justify-center text-gray-500">
-                <span class="text-lg">♥</span> Match
-            </a>
-            <a href="/notifications" class="flex flex-col items-center justify-center text-gray-500">
-                <span class="text-lg">💬</span> Chat
-            </a>
-            <a href="/profile" class="flex flex-col items-center justify-center text-gray-500">
-                <span class="text-lg">👤</span> Profilo
-            </a>
+            <a href="/discover" class="flex flex-col items-center justify-center text-red-pure"><span class="text-lg">🔥</span> Scopri</a>
+            <a href="/matches" class="flex flex-col items-center justify-center text-gray-500"><span class="text-lg">♥</span> Match</a>
+            <a href="/notifications" class="flex flex-col items-center justify-center text-gray-500"><span class="text-lg">💬</span> Chat</a>
+            <a href="/profile" class="flex flex-col items-center justify-center text-gray-500"><span class="text-lg">👤</span> Profilo</a>
         </div>
     </nav>
+
     <script>
-(function() {
-    // Prendi l'ID utente dalla pagina (lo passiamo dal backend)
-    const userId = {{ user.id if user else 'null' }};
-    
-    if (!userId) return;
-
-    let ws;
-    let reconnectTimeout;
-
-    function connect() {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws/${userId}`;
-        
-        ws = new WebSocket(wsUrl);
-
-        ws.onopen = function() {
-            console.log('WebSocket connesso');
-        };
-
-        ws.onmessage = function(event) {
-            const data = JSON.parse(event.data);
-            
-            // Mostra notifica
-            showNotification(data.title || 'Nuova notifica', data.message || '');
-            
-            // Se è un nuovo messaggio e siamo in chat, potremmo aggiornare
-            if (data.type === 'nuovo_match') {
-                // Opzionale: ricarica la pagina match dopo 1 secondo
-                // setTimeout(() => location.href = '/matches', 1500);
-            }
-        };
-
-        ws.onclose = function() {
-            console.log('WebSocket chiuso, riconnessione...');
-            reconnectTimeout = setTimeout(connect, 3000);
-        };
-
-        ws.onerror = function() {
-            ws.close();
-        };
-    }
-
-    function showNotification(title, message) {
-        // Crea un toast in alto
-        const toast = document.createElement('div');
-        toast.style.cssText = `
-            position: fixed;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: #ff1a1a;
-            color: white;
-            padding: 14px 24px;
-            border-radius: 12px;
-            font-family: 'Oswald', sans-serif;
-            font-size: 15px;
-            z-index: 9999;
-            box-shadow: 0 8px 30px rgba(255,26,26,0.4);
-            text-align: center;
-            max-width: 90%;
-        `;
-        toast.innerHTML = `<strong>${title}</strong><br><span style="font-size:13px;opacity:0.9">${message}</span>`;
-        document.body.appendChild(toast);
-
-        setTimeout(() => {
-            toast.style.transition = 'opacity 0.4s';
-            toast.style.opacity = '0';
-            setTimeout(() => toast.remove(), 400);
-        }, 4000);
-    }
-
-    connect();
-})();
-</script>
+    (function() {
+        const userId = {{ user.id if user else 'null' }};
+        if (!userId) return;
+        let ws;
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws/${userId}`);
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                const toast = document.createElement('div');
+                toast.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#ff1a1a;color:white;padding:14px 24px;border-radius:12px;z-index:9999;text-align:center;max-width:90%;font-family:Oswald,sans-serif;';
+                toast.innerHTML = `<strong>${data.title || 'Notifica'}</strong><br><span style="font-size:13px">${data.message || ''}</span>`;
+                document.body.appendChild(toast);
+                setTimeout(() => { toast.style.opacity='0'; setTimeout(() => toast.remove(), 400); }, 4000);
+            };
+            ws.onclose = function() { setTimeout(connect, 3000); };
+        }
+        connect();
+    })();
+    </script>
 </body>
 </html>

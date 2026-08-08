@@ -18,7 +18,19 @@
         <div class="font-hot text-xl tracking-wider flex items-center gap-2">
             <span class="text-red-pure">🔥</span> MY CHEATING
         </div>
-        <a href="/profile" class="text-sm text-gray-400">Profilo</a>
+        <div class="flex items-center gap-3 text-sm">
+            <button id="gps-btn" onclick="requestLocation()" class="text-xs px-3 py-1.5 rounded-full border border-white/20 text-gray-300 hover:border-[#ff1a1a] hover:text-red-pure">
+                {% if has_gps %}📍 GPS attivo{% else %}📍 Attiva GPS{% endif %}
+            </button>
+            <a href="/profile" class="text-gray-400">Profilo</a>
+        </div>
+    </div>
+
+    <div id="gps-banner" class="hidden max-w-md mx-auto px-4 pt-3">
+        <div class="bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-gray-300 flex items-center justify-between gap-3">
+            <span id="gps-status">Attiva la posizione per vedere chi è vicino a te</span>
+            <button onclick="requestLocation()" class="text-red-pure text-xs font-semibold shrink-0">Attiva</button>
+        </div>
     </div>
 
     <div class="max-w-md mx-auto px-4 py-8">
@@ -29,13 +41,21 @@
                 {% if candidate.is_online %}
                 <div class="absolute top-4 right-4 bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-full">ONLINE</div>
                 {% endif %}
+                {% if candidate.distance_km is not none %}
+                <div class="absolute bottom-4 left-4 bg-black/70 text-white text-sm font-medium px-3 py-1.5 rounded-full border border-white/10">
+                    📍 {{ candidate.distance_km }} km
+                </div>
+                {% endif %}
             </div>
             <div class="p-6">
                 <div class="flex items-baseline gap-2 mb-1">
                     <h2 class="font-hot text-3xl tracking-wide">{{ candidate.nome }}</h2>
                     <span class="text-gray-400 text-xl">{{ candidate.eta }}</span>
                 </div>
-                {% if candidate.citta %}<p class="text-gray-500 text-sm mb-4">📍 {{ candidate.citta }}</p>{% endif %}
+                {% if candidate.citta %}<p class="text-gray-500 text-sm mb-2">📍 {{ candidate.citta }}</p>{% endif %}
+                {% if candidate.distance_km is not none %}
+                <p class="text-red-pure text-sm mb-4">A {{ candidate.distance_km }} km da te</p>
+                {% endif %}
                 {% if candidate.bio %}<p class="text-gray-300 mb-5 leading-relaxed">{{ candidate.bio }}</p>{% endif %}
                 {% if candidate.interessi %}
                 <div class="flex flex-wrap gap-2 mb-6">
@@ -66,8 +86,9 @@
         {% else %}
         <div class="text-center py-20">
             <div class="text-5xl mb-4">🔍</div>
-            <h2 class="font-hot text-2xl mb-2">Nessun profilo</h2>
-            <p class="text-gray-500">Torna più tardi</p>
+            <h2 class="font-hot text-2xl mb-2">Nessun profilo vicino</h2>
+            <p class="text-gray-500 mb-4">Prova ad aumentare il raggio GPS nel profilo</p>
+            <a href="/profile" class="text-red-pure text-sm">Impostazioni distanza →</a>
         </div>
         {% endif %}
     </div>
@@ -96,6 +117,63 @@
     </nav>
 
     <script>
+    const hasGps = {{ 'true' if has_gps else 'false' }};
+
+    function requestLocation() {
+        const btn = document.getElementById('gps-btn');
+        const banner = document.getElementById('gps-banner');
+        const status = document.getElementById('gps-status');
+        if (!navigator.geolocation) {
+            alert('GPS non supportato da questo browser');
+            return;
+        }
+        if (btn) btn.textContent = '📍 Cerco...';
+        navigator.geolocation.getCurrentPosition(
+            async function(pos) {
+                try {
+                    const res = await fetch('/location', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            latitude: pos.coords.latitude,
+                            longitude: pos.coords.longitude
+                        })
+                    });
+                    const data = await res.json();
+                    if (data.ok) {
+                        if (btn) btn.textContent = '📍 GPS attivo';
+                        if (status) status.textContent = 'Posizione salvata! Ricarico...';
+                        setTimeout(() => location.reload(), 800);
+                    } else {
+                        if (btn) btn.textContent = '📍 Attiva GPS';
+                        alert('Errore nel salvare la posizione');
+                    }
+                } catch (e) {
+                    if (btn) btn.textContent = '📍 Attiva GPS';
+                    alert('Errore di rete');
+                }
+            },
+            function(err) {
+                if (btn) btn.textContent = '📍 Attiva GPS';
+                if (banner) banner.classList.remove('hidden');
+                if (status) status.textContent = 'Permesso GPS negato. Attivalo dalle impostazioni del browser.';
+            },
+            { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
+        );
+    }
+
+    // Auto-request if no GPS yet
+    if (!hasGps) {
+        document.getElementById('gps-banner')?.classList.remove('hidden');
+        // soft auto prompt after 1s
+        setTimeout(() => {
+            if (navigator.geolocation) {
+                // don't force popup immediately; user can click
+            }
+        }, 500);
+    }
+
+    // WebSocket toasts
     (function() {
         const userId = {{ user.id if user else 'null' }};
         if (!userId) return;

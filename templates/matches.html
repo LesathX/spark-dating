@@ -44,7 +44,9 @@
                 </div>
                 <div class="flex-1 min-w-0">
                     <div class="font-hot text-lg tracking-wide">{{ m.nome }} <span class="text-gray-500 text-base">{{ m.eta }}</span></div>
-                    <p class="text-sm text-gray-500">Tocca per chattare</p>
+                    <p class="text-sm text-gray-500">
+                        {% if m.distance_km is not none %}📍 {{ m.distance_km }} km · {% endif %}Tocca per chattare
+                    </p>
                 </div>
                 <div class="text-[#ff1a1a] text-xl">💬</div>
             </a>

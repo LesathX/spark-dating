@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from fastapi import FastAPI, Request, Form, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -9,6 +9,7 @@ from pathlib import Path
 from datetime import datetime, date
 from typing import Optional, Dict, List
 import os
+import math
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -103,6 +104,16 @@ def unread_count(user_id):
     except Exception:
         return 0
 
+def haversine_km(lat1, lon1, lat2, lon2):
+    if None in (lat1, lon1, lat2, lon2):
+        return None
+    R = 6371.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
 def require_admin(req):
     user = current_user(req)
     if not user or not user.get("is_admin"):
@@ -193,33 +204,139 @@ async def logout(req: Request):
     req.session.clear()
     return RedirectResponse("/", 303)
 
+@app.post("/location")
+async def save_location(req: Request):
+    user = current_user(req)
+    if not user:
+        return JSONResponse({"ok": False, "error": "not logged in"}, status_code=401)
+    try:
+        body = await req.json()
+        lat = float(body.get("latitude"))
+        lng = float(body.get("longitude"))
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            return JSONResponse({"ok": False, "error": "invalid coords"}, status_code=400)
+        c = db()
+        cur = c.cursor()
+        cur.execute(
+            "UPDATE users SET latitude=%s, longitude=%s, location_updated_at=CURRENT_TIMESTAMP WHERE id=%s",
+            (lat, lng, user["id"]),
+        )
+        c.commit()
+        cur.close()
+        c.close()
+        return JSONResponse({"ok": True, "latitude": lat, "longitude": lng})
+    except Exception as e:
+        print("location error:", e)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
 @app.get("/discover", response_class=HTMLResponse)
 async def discover(req: Request):
     user = current_user(req)
     if not user:
         return RedirectResponse("/login", 303)
+
+    # max distance from preferences
+    distanza_max = 50
+    try:
+        c0 = db()
+        cur0 = c0.cursor()
+        cur0.execute("SELECT distanza_max FROM user_preferences WHERE user_id=%s", (user["id"],))
+        pref = cur0.fetchone()
+        if pref and pref.get("distanza_max"):
+            distanza_max = int(pref["distanza_max"])
+        cur0.close()
+        c0.close()
+    except Exception:
+        pass
+
+    my_lat = user.get("latitude")
+    my_lng = user.get("longitude")
+    has_gps = my_lat is not None and my_lng is not None
+
     c = db()
     cur = c.cursor()
-    cur.execute("""SELECT u.* FROM users u WHERE u.id!=%s AND u.stato='attivo'
-                   AND u.id NOT IN (SELECT to_user_id FROM swipes WHERE from_user_id=%s)
-                   AND u.id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id=%s)
-                   AND u.id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id=%s)
-                   ORDER BY RANDOM() LIMIT 1""", (user["id"], user["id"], user["id"], user["id"]))
-    cand = cur.fetchone()
+
+    if has_gps:
+        # Haversine distance in SQL, order by nearest first
+        cur.execute("""
+            SELECT u.*,
+                   (6371 * acos(
+                       LEAST(1.0, GREATEST(-1.0,
+                           cos(radians(%s)) * cos(radians(u.latitude))
+                           * cos(radians(u.longitude) - radians(%s))
+                           + sin(radians(%s)) * sin(radians(u.latitude))
+                       ))
+                   )) AS distance_km
+            FROM users u
+            WHERE u.id != %s
+              AND u.stato = 'attivo'
+              AND u.latitude IS NOT NULL
+              AND u.longitude IS NOT NULL
+              AND u.id NOT IN (SELECT to_user_id FROM swipes WHERE from_user_id = %s)
+              AND u.id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = %s)
+              AND u.id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = %s)
+              AND (6371 * acos(
+                       LEAST(1.0, GREATEST(-1.0,
+                           cos(radians(%s)) * cos(radians(u.latitude))
+                           * cos(radians(u.longitude) - radians(%s))
+                           + sin(radians(%s)) * sin(radians(u.latitude))
+                       ))
+                   )) <= %s
+            ORDER BY distance_km ASC
+            LIMIT 1
+        """, (my_lat, my_lng, my_lat, user["id"], user["id"], user["id"], user["id"],
+              my_lat, my_lng, my_lat, distanza_max))
+        cand = cur.fetchone()
+
+        # fallback: users without GPS if no nearby found
+        if not cand:
+            cur.execute("""
+                SELECT u.* FROM users u
+                WHERE u.id != %s AND u.stato = 'attivo'
+                  AND u.id NOT IN (SELECT to_user_id FROM swipes WHERE from_user_id = %s)
+                  AND u.id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = %s)
+                  AND u.id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = %s)
+                ORDER BY RANDOM() LIMIT 1
+            """, (user["id"], user["id"], user["id"], user["id"]))
+            cand = cur.fetchone()
+    else:
+        cur.execute("""
+            SELECT u.* FROM users u
+            WHERE u.id != %s AND u.stato = 'attivo'
+              AND u.id NOT IN (SELECT to_user_id FROM swipes WHERE from_user_id = %s)
+              AND u.id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = %s)
+              AND u.id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = %s)
+            ORDER BY RANDOM() LIMIT 1
+        """, (user["id"], user["id"], user["id"], user["id"]))
+        cand = cur.fetchone()
+
     candidate = None
     if cand:
         candidate = dict(cand)
         candidate["eta"] = eta(candidate["data_nascita"])
         candidate["interessi"] = []
+        if candidate.get("distance_km") is not None:
+            candidate["distance_km"] = round(float(candidate["distance_km"]), 1)
+        elif has_gps and candidate.get("latitude") and candidate.get("longitude"):
+            d = haversine_km(my_lat, my_lng, candidate["latitude"], candidate["longitude"])
+            candidate["distance_km"] = round(d, 1) if d is not None else None
+        else:
+            candidate["distance_km"] = None
         try:
             cur.execute("SELECT i.nome FROM user_interests ui JOIN interests i ON i.id=ui.interest_id WHERE ui.user_id=%s", (candidate["id"],))
             candidate["interessi"] = [r["nome"] for r in cur.fetchall()]
         except Exception:
             pass
+
     cur.close()
     c.close()
     return templates.TemplateResponse("discover.html", {
-        "request": req, "user": user, "candidate": candidate, "unread": unread_count(user["id"])
+        "request": req,
+        "user": user,
+        "candidate": candidate,
+        "unread": unread_count(user["id"]),
+        "has_gps": has_gps,
+        "distanza_max": distanza_max,
     })
 
 @app.post("/swipe")
@@ -268,7 +385,7 @@ async def matches_page(req: Request):
     cur = c.cursor()
     cur.execute("""SELECT m.id as match_id, m.data_match,
                   CASE WHEN m.user1_id=%s THEN m.user2_id ELSE m.user1_id END as altro_id,
-                  u.username, u.nome, u.foto_principale_url, u.is_online,
+                  u.username, u.nome, u.foto_principale_url, u.is_online, u.latitude, u.longitude,
                   c.id as conversation_id
            FROM matches m
            JOIN users u ON u.id = CASE WHEN m.user1_id=%s THEN m.user2_id ELSE m.user1_id END
@@ -277,6 +394,7 @@ async def matches_page(req: Request):
            ORDER BY m.data_match DESC""", (user["id"], user["id"], user["id"], user["id"]))
     matches = cur.fetchall()
     match_list = []
+    my_lat, my_lng = user.get("latitude"), user.get("longitude")
     for m in matches:
         d = dict(m)
         try:
@@ -285,6 +403,11 @@ async def matches_page(req: Request):
             d["eta"] = eta(row["data_nascita"]) if row else 0
         except Exception:
             d["eta"] = 0
+        if my_lat and my_lng and d.get("latitude") and d.get("longitude"):
+            dist = haversine_km(my_lat, my_lng, d["latitude"], d["longitude"])
+            d["distance_km"] = round(dist, 1) if dist is not None else None
+        else:
+            d["distance_km"] = None
         match_list.append(d)
     new_match = req.query_params.get("new_match")
     cur.close()
@@ -377,13 +500,20 @@ async def profile_page(req: Request):
     })
 
 @app.post("/profile/update")
-async def update_profile(req: Request, bio: str = Form(""), citta: str = Form(""), altezza: Optional[int] = Form(None), fuma: str = Form(""), beve: str = Form(""), cerca: str = Form("")):
+async def update_profile(req: Request, bio: str = Form(""), citta: str = Form(""), altezza: Optional[int] = Form(None),
+                         fuma: str = Form(""), beve: str = Form(""), cerca: str = Form(""),
+                         distanza_max: Optional[int] = Form(None)):
     user = current_user(req)
     if not user:
         return RedirectResponse("/login", 303)
     c = db()
     cur = c.cursor()
-    cur.execute("UPDATE users SET bio=%s, citta=%s, altezza=%s, fuma=%s, beve=%s, cerca=%s WHERE id=%s", (bio or None, citta or None, altezza, fuma or None, beve or None, cerca or None, user["id"]))
+    cur.execute("UPDATE users SET bio=%s, citta=%s, altezza=%s, fuma=%s, beve=%s, cerca=%s WHERE id=%s",
+                (bio or None, citta or None, altezza, fuma or None, beve or None, cerca or None, user["id"]))
+    if distanza_max is not None and 1 <= distanza_max <= 500:
+        cur.execute("""INSERT INTO user_preferences (user_id, distanza_max) VALUES (%s, %s)
+                       ON CONFLICT (user_id) DO UPDATE SET distanza_max = EXCLUDED.distanza_max""",
+                    (user["id"], distanza_max))
     c.commit()
     cur.close()
     c.close()
@@ -441,7 +571,7 @@ async def admin_panel(req: Request):
     messages_count = cur.fetchone()["c"]
     cur.execute("SELECT COUNT(*) as c FROM users WHERE is_online=1")
     online_count = cur.fetchone()["c"]
-    cur.execute("SELECT id, nome, username, email, stato, is_admin FROM users ORDER BY id DESC LIMIT 100")
+    cur.execute("SELECT id, nome, username, email, stato, is_admin, latitude, longitude FROM users ORDER BY id DESC LIMIT 100")
     users = cur.fetchall()
     cur.execute("""SELECT m.data_match, u1.nome as nome1, u2.nome as nome2
                    FROM matches m

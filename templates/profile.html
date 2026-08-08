@@ -36,7 +36,22 @@
                 <div class="font-hot text-2xl tracking-wide">{{ user.nome }}, {{ user.eta }}</div>
                 <div class="text-gray-400 text-sm">@{{ user.username }}</div>
                 {% if user.citta %}<div class="text-gray-500 text-sm mt-1">📍 {{ user.citta }}</div>{% endif %}
+                {% if user.latitude and user.longitude %}
+                <div class="text-green-400 text-xs mt-1">📍 GPS attivo</div>
+                {% else %}
+                <div class="text-gray-500 text-xs mt-1">GPS non attivo</div>
+                {% endif %}
             </div>
+        </div>
+
+        <!-- GPS button -->
+        <div class="bg-white/5 border border-white/10 rounded-2xl p-5 mb-6">
+            <h2 class="font-hot text-xl tracking-wide mb-2">POSIZIONE</h2>
+            <p class="text-gray-500 text-sm mb-4">Attiva il GPS per vedere utenti vicini a te</p>
+            <button type="button" id="gps-btn" onclick="requestLocation()" class="w-full bg-[#ff1a1a] text-white font-semibold py-3.5 rounded-xl tracking-wide">
+                {% if user.latitude %}📍 AGGIORNA POSIZIONE{% else %}📍 ATTIVA GPS{% endif %}
+            </button>
+            <p id="gps-msg" class="text-xs text-gray-500 mt-3 text-center"></p>
         </div>
 
         <form method="post" action="/profile/update" class="bg-white/5 border border-white/10 rounded-2xl p-6 mb-6 space-y-4">
@@ -52,6 +67,11 @@
                     <option value="amicizia" {% if user.cerca == 'amicizia' %}selected{% endif %}>Amicizia</option>
                     <option value="altro" {% if user.cerca == 'altro' %}selected{% endif %}>Altro</option>
                 </select>
+            </div>
+            <div>
+                <label class="text-sm text-gray-400 mb-1 block">Distanza massima (km)</label>
+                <input type="number" name="distanza_max" min="1" max="500" value="{{ prefs.distanza_max if prefs and prefs.distanza_max else 50 }}"
+                       class="w-full bg-transparent border border-white/15 text-white placeholder-gray-500 rounded-xl px-4 py-3 text-sm">
             </div>
             <button type="submit" class="w-full bg-[#ff1a1a] text-white font-semibold py-3.5 rounded-xl tracking-wide">SALVA</button>
         </form>
@@ -94,6 +114,48 @@
     </nav>
 
     <script>
+    function requestLocation() {
+        const btn = document.getElementById('gps-btn');
+        const msg = document.getElementById('gps-msg');
+        if (!navigator.geolocation) {
+            msg.textContent = 'GPS non supportato';
+            return;
+        }
+        btn.textContent = '📍 Cerco posizione...';
+        navigator.geolocation.getCurrentPosition(
+            async function(pos) {
+                try {
+                    const res = await fetch('/location', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            latitude: pos.coords.latitude,
+                            longitude: pos.coords.longitude
+                        })
+                    });
+                    const data = await res.json();
+                    if (data.ok) {
+                        btn.textContent = '📍 GPS ATTIVO';
+                        msg.textContent = 'Posizione salvata correttamente';
+                        msg.className = 'text-xs text-green-400 mt-3 text-center';
+                    } else {
+                        btn.textContent = '📍 ATTIVA GPS';
+                        msg.textContent = 'Errore nel salvataggio';
+                    }
+                } catch (e) {
+                    btn.textContent = '📍 ATTIVA GPS';
+                    msg.textContent = 'Errore di rete';
+                }
+            },
+            function(err) {
+                btn.textContent = '📍 ATTIVA GPS';
+                msg.textContent = 'Permesso negato. Attiva la posizione dal browser.';
+                msg.className = 'text-xs text-red-400 mt-3 text-center';
+            },
+            { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
+        );
+    }
+
     (function() {
         const userId = {{ user.id if user else 'null' }};
         if (!userId) return;

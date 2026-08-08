@@ -501,7 +501,7 @@ async def chat_page(req: Request, conversation_id: int):
     if not conv or user["id"] not in (conv["user1_id"], conv["user2_id"]):
         cur.close()
         c.close()
-        return RedirectResponse("/matches", 303)
+        return RedirectResponse("/chats", 303)
     altro_id = conv["user2_id"] if user["id"] == conv["user1_id"] else conv["user1_id"]
     cur.execute("SELECT * FROM users WHERE id=%s", (altro_id,))
     altro = dict(cur.fetchone())
@@ -531,7 +531,7 @@ async def send_message(req: Request, conversation_id: int, contenuto: str = Form
     if not conv or user["id"] not in (conv["user1_id"], conv["user2_id"]):
         cur.close()
         c.close()
-        return RedirectResponse("/matches", 303)
+        return RedirectResponse("/chats", 303)
     cur.execute("INSERT INTO messages (conversation_id,sender_id,tipo,contenuto) VALUES (%s,%s,'testo',%s)", (conversation_id, user["id"], contenuto))
     cur.execute("UPDATE conversations SET ultimo_messaggio_at=CURRENT_TIMESTAMP WHERE id=%s", (conversation_id,))
     altro_id = conv["user2_id"] if user["id"] == conv["user1_id"] else conv["user1_id"]

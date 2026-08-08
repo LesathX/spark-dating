@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat – MyCheating</title>
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0a0a0a; font-family: 'Oswald', sans-serif; }
+        .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
+        .text-red-pure { color: #ff1a1a; }
+    </style>
+</head>
+<body class="text-white min-h-screen flex flex-col">
+
+    <div class="flex items-center gap-3 px-4 py-3 border-b border-white/10">
+        <a href="/matches" class="text-gray-400 text-xl">←</a>
+        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-red-700 to-black flex items-center justify-center font-hot">
+            {{ altro.nome[0] | upper }}
+        </div>
+        <div>
+            <div class="font-hot text-lg tracking-wide">{{ altro.nome }}, {{ altro.eta }}</div>
+            <div class="text-xs text-gray-500">@{{ altro.username }}</div>
+        </div>
+    </div>
+
+    <div class="flex-1 overflow-y-auto px-4 py-4 space-y-3" id="messages">
+        {% for msg in messaggi %}
+        <div class="flex {% if msg.sender_id == user.id %}justify-end{% else %}justify-start{% endif %}">
+            <div class="max-w-[75%] px-4 py-2.5 rounded-2xl text-sm
+                {% if msg.sender_id == user.id %}
+                    bg-[#ff1a1a] text-white rounded-br-md
+                {% else %}
+                    bg-white/10 text-white rounded-bl-md
+                {% endif %}">
+                {{ msg.contenuto }}
+                <div class="text-[10px] mt-1 opacity-60 text-right">
+                    {{ msg.data_invio[11:16] if msg.data_invio else '' }}
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="text-center text-gray-500 py-16">
+            <div class="text-3xl mb-2">👋</div>
+            Inizia la conversazione con {{ altro.nome }}
+        </div>
+        {% endfor %}
+    </div>
+
+    <form method="post" action="/chat/{{ conversation_id }}/send" class="p-4 border-t border-white/10 flex gap-2">
+        <input type="text" name="contenuto" required placeholder="Scrivi un messaggio..."
+               class="flex-1 bg-white/5 border border-white/15 text-white placeholder-gray-500 rounded-full px-5 py-3 text-sm outline-none focus:border-[#ff1a1a]"
+               autocomplete="off">
+        <button type="submit" class="w-12 h-12 rounded-full bg-[#ff1a1a] text-white flex items-center justify-center shrink-0">➤</button>
+    </form>
+
+    <script>
+        const messages = document.getElementById('messages');
+        if (messages) messages.scrollTop = messages.scrollHeight;
+        (function() {
+            const userId = {{ user.id if user else 'null' }};
+            if (!userId) return;
+            let ws;
+            function connect() {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                ws = new WebSocket(`${protocol}//${window.location.host}/ws/${userId}`);
+                ws.onmessage = function(event) {
+                    const data = JSON.parse(event.data);
+                    const toast = document.createElement('div');
+                    toast.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#ff1a1a;color:white;padding:14px 24px;border-radius:12px;z-index:9999;text-align:center;max-width:90%;font-family:Oswald,sans-serif;';
+                    toast.innerHTML = `<strong>${data.title || 'Notifica'}</strong><br><span style="font-size:13px">${data.message || ''}</span>`;
+                    document.body.appendChild(toast);
+                    setTimeout(() => { toast.style.opacity='0'; setTimeout(() => toast.remove(), 400); }, 4000);
+                };
+                ws.onclose = function() { setTimeout(connect, 3000); };
+            }
+            connect();
+        })();
+    </script>
+</body>
+</html>

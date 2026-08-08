@@ -11,10 +11,19 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
         .btn-red {
-            background: #e11d48;
+            background: #dc2626;
         }
         .btn-red:hover {
-            background: #be123c;
+            background: #b91c1c;
+        }
+        .text-red-pure {
+            color: #dc2626;
+        }
+        .border-red-pure {
+            border-color: #dc2626;
+        }
+        .bg-red-pure {
+            background-color: #dc2626;
         }
     </style>
 </head>
@@ -23,10 +32,10 @@
     <!-- Navbar -->
     <nav class="flex items-center justify-between px-6 py-4 border-b border-white/10">
         <div class="flex items-center gap-2 font-bold text-lg tracking-wide">
-            <span class="text-red-500 text-xl">🔥</span>
+            <span class="text-red-pure text-xl">🔥</span>
             MY CHEATING
         </div>
-        <a href="/login" class="border border-red-500 text-red-500 text-sm font-semibold px-5 py-2 rounded hover:bg-red-500 hover:text-white transition">
+        <a href="/login" class="border border-red-pure text-red-pure text-sm font-semibold px-5 py-2 rounded hover:bg-red-pure hover:text-white transition">
             ACCEDI
         </a>
     </nav>
@@ -36,9 +45,96 @@
         
         <!-- Testo sinistra -->
         <div>
-            <p class="text-red-500 text-sm font-medium tracking-widest mb-4">— INCONTRI REALI</p>
+            <p class="text-red-pure text-sm font-medium tracking-widest mb-4">— INCONTRI REALI</p>
             <h1 class="text-5xl md:text-6xl font-extrabold leading-tight mb-6">
                 TROVA<br>
                 CHI<br>
-                <span class="text-red-500">CERCHI</span>
-            </h1
+                <span class="text-red-pure">CERCHI</span>
+            </h1>
+            <p class="text-gray-400 text-lg mb-8 max-w-md leading-relaxed">
+                La piattaforma più diretta per incontrare persone reali vicino a te. Profili verificati, chat privata, galleria personale.
+            </p>
+            <div class="flex flex-wrap gap-4">
+                <a href="/register" class="btn-red text-white font-semibold px-8 py-3.5 rounded flex items-center gap-2">
+                    REGISTRATI GRATIS →
+                </a>
+                <a href="/login" class="border border-white/20 text-white font-semibold px-8 py-3.5 rounded hover:bg-white/5 transition">
+                    ACCEDI
+                </a>
+            </div>
+        </div>
+
+        <!-- Card destra - VIDEO INTERO (senza tagli) -->
+        <div class="relative">
+            <div class="rounded-xl overflow-hidden border border-white/10 shadow-2xl shadow-red-900/30 bg-black aspect-[16/9]">
+                <video 
+                    autoplay 
+                    muted 
+                    loop 
+                    playsinline
+                    class="w-full h-full object-contain"
+                >
+                    <source src="https://files.catbox.moe/p3bzvt.mp4" type="video/mp4">
+                </video>
+            </div>
+        </div>
+    </section>
+
+    <!-- Stats -->
+    <section class="border-y border-white/10">
+        <div class="max-w-6xl mx-auto grid grid-cols-3 text-center">
+            <div class="py-8 border-r border-white/10">
+                <div class="text-3xl font-bold text-red-pure">100%</div>
+                <div class="text-xs text-gray-500 tracking-widest mt-1">GRATUITO</div>
+            </div>
+            <div class="py-8 border-r border-white/10">
+                <div class="text-3xl font-bold text-red-pure">24H</div>
+                <div class="text-xs text-gray-500 tracking-widest mt-1">STORIE LIVE</div>
+            </div>
+            <div class="py-8">
+                <div class="text-3xl font-bold text-red-pure">GPS</div>
+                <div class="text-xs text-gray-500 tracking-widest mt-1">NEARBY</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Come funziona -->
+    <section class="max-w-6xl mx-auto px-6 py-20">
+        <h2 class="text-center text-2xl font-bold mb-12 tracking-wide">
+            COME <span class="text-red-pure">FUNZIONA</span>
+        </h2>
+
+        <div class="grid md:grid-cols-3 gap-6">
+            <div class="bg-white/5 border border-white/10 rounded-xl p-6 hover:border-red-500/50 transition">
+                <div class="w-12 h-12 rounded-lg bg-red-600/20 flex items-center justify-center text-red-pure text-xl mb-4">📍</div>
+                <h3 class="font-bold text-lg mb-2 text-white">VICINO A TE</h3>
+                <p class="text-gray-400 text-sm leading-relaxed">
+                    Persone reali nella tua zona. Geolocalizzazione attiva per trovare chi è più vicino.
+                </p>
+            </div>
+
+            <div class="bg-white/5 border border-white/10 rounded-xl p-6 hover:border-red-500/50 transition">
+                <div class="w-12 h-12 rounded-lg bg-red-600/20 flex items-center justify-center text-red-pure text-xl mb-4">📷</div>
+                <h3 class="font-bold text-lg mb-2 text-white">FOTO & STORIE</h3>
+                <p class="text-gray-400 text-sm leading-relaxed">
+                    Profili con galleria pubblica e privata. Storie che scompaiono in 24 ore.
+                </p>
+            </div>
+
+            <div class="bg-white/5 border border-white/10 rounded-xl p-6 hover:border-red-500/50 transition">
+                <div class="w-12 h-12 rounded-lg bg-red-600/20 flex items-center justify-center text-red-pure text-xl mb-4">💬</div>
+                <h3 class="font-bold text-lg mb-2 text-white">MATCH & CHAT</h3>
+                <p class="text-gray-400 text-sm leading-relaxed">
+                    Swipe, match e chat privata. Vedi il profilo di chi ti piace e scriviti subito.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="border-t border-white/10 py-8 text-center text-gray-600 text-sm">
+        © 2026 MyCheating — Incontri reali vicino a te
+    </footer>
+
+</body>
+</html>

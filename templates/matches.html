@@ -14,7 +14,6 @@
 </head>
 <body class="text-white min-h-screen pb-24">
 
-    <!-- Top bar -->
     <div class="flex items-center justify-between px-5 py-4 border-b border-white/10">
         <div class="font-hot text-xl tracking-wider flex items-center gap-2">
             <span class="text-red-pure">🔥</span> MY CHEATING
@@ -56,29 +55,40 @@
             <div class="text-5xl mb-4">💔</div>
             <h2 class="font-hot text-2xl mb-2">Nessun match</h2>
             <p class="text-gray-500 mb-6">Inizia a fare swipe!</p>
-            <a href="/discover" class="inline-block bg-[#ff1a1a] text-white font-semibold px-8 py-3 rounded-xl">
-                Vai a Scopri
-            </a>
+            <a href="/discover" class="inline-block bg-[#ff1a1a] text-white font-semibold px-8 py-3 rounded-xl">Vai a Scopri</a>
         </div>
         {% endif %}
     </div>
 
-    <!-- Bottom nav -->
     <nav class="fixed bottom-0 left-0 right-0 bg-[#0a0a0a] border-t border-white/10">
         <div class="max-w-md mx-auto grid grid-cols-4 h-16 text-xs">
-            <a href="/discover" class="flex flex-col items-center justify-center text-gray-500">
-                <span class="text-lg">🔥</span> Scopri
-            </a>
-            <a href="/matches" class="flex flex-col items-center justify-center text-red-pure">
-                <span class="text-lg">♥</span> Match
-            </a>
-            <a href="/notifications" class="flex flex-col items-center justify-center text-gray-500">
-                <span class="text-lg">💬</span> Chat
-            </a>
-            <a href="/profile" class="flex flex-col items-center justify-center text-gray-500">
-                <span class="text-lg">👤</span> Profilo
-            </a>
+            <a href="/discover" class="flex flex-col items-center justify-center text-gray-500"><span class="text-lg">🔥</span> Scopri</a>
+            <a href="/matches" class="flex flex-col items-center justify-center text-red-pure"><span class="text-lg">♥</span> Match</a>
+            <a href="/notifications" class="flex flex-col items-center justify-center text-gray-500"><span class="text-lg">💬</span> Chat</a>
+            <a href="/profile" class="flex flex-col items-center justify-center text-gray-500"><span class="text-lg">👤</span> Profilo</a>
         </div>
     </nav>
+
+    <script>
+    (function() {
+        const userId = {{ user.id if user else 'null' }};
+        if (!userId) return;
+        let ws;
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws/${userId}`);
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                const toast = document.createElement('div');
+                toast.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#ff1a1a;color:white;padding:14px 24px;border-radius:12px;z-index:9999;text-align:center;max-width:90%;font-family:Oswald,sans-serif;';
+                toast.innerHTML = `<strong>${data.title || 'Notifica'}</strong><br><span style="font-size:13px">${data.message || ''}</span>`;
+                document.body.appendChild(toast);
+                setTimeout(() => { toast.style.opacity='0'; setTimeout(() => toast.remove(), 400); }, 4000);
+            };
+            ws.onclose = function() { setTimeout(connect, 3000); };
+        }
+        connect();
+    })();
+    </script>
 </body>
 </html>

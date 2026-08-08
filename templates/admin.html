@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin – MyCheating</title>
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0a0a0a; font-family: 'Oswald', sans-serif; }
+        .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
+        .text-red-pure { color: #ff1a1a; }
+    </style>
+</head>
+<body class="text-white min-h-screen">
+
+    <div class="flex items-center justify-between px-5 py-4 border-b border-white/10">
+        <div class="font-hot text-xl tracking-wider flex items-center gap-2">
+            <span class="text-red-pure">🔥</span> ADMIN PANEL
+        </div>
+        <div class="flex gap-4 text-sm">
+            <a href="/discover" class="text-gray-400 hover:text-white">App</a>
+            <a href="/logout" class="text-red-pure">Esci</a>
+        </div>
+    </div>
+
+    <div class="max-w-5xl mx-auto px-4 py-8">
+
+        <!-- Stats -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
+            <div class="bg-white/5 border border-white/10 rounded-xl p-5 text-center">
+                <div class="text-3xl font-hot text-red-pure">{{ stats.users }}</div>
+                <div class="text-xs text-gray-500 tracking-widest mt-1">UTENTI</div>
+            </div>
+            <div class="bg-white/5 border border-white/10 rounded-xl p-5 text-center">
+                <div class="text-3xl font-hot text-red-pure">{{ stats.matches }}</div>
+                <div class="text-xs text-gray-500 tracking-widest mt-1">MATCH</div>
+            </div>
+            <div class="bg-white/5 border border-white/10 rounded-xl p-5 text-center">
+                <div class="text-3xl font-hot text-red-pure">{{ stats.messages }}</div>
+                <div class="text-xs text-gray-500 tracking-widest mt-1">MESSAGGI</div>
+            </div>
+            <div class="bg-white/5 border border-white/10 rounded-xl p-5 text-center">
+                <div class="text-3xl font-hot text-red-pure">{{ stats.online }}</div>
+                <div class="text-xs text-gray-500 tracking-widest mt-1">ONLINE</div>
+            </div>
+        </div>
+
+        <!-- Users -->
+        <h2 class="font-hot text-2xl tracking-wide mb-4">UTENTI</h2>
+        <div class="bg-white/5 border border-white/10 rounded-xl overflow-hidden mb-10">
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="border-b border-white/10 text-gray-500 text-left">
+                        <tr>
+                            <th class="px-4 py-3">ID</th>
+                            <th class="px-4 py-3">Nome</th>
+                            <th class="px-4 py-3">Email</th>
+                            <th class="px-4 py-3">Stato</th>
+                            <th class="px-4 py-3">Azioni</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for u in users %}
+                        <tr class="border-b border-white/5 hover:bg-white/5">
+                            <td class="px-4 py-3 text-gray-500">{{ u.id }}</td>
+                            <td class="px-4 py-3">
+                                <span class="font-hot">{{ u.nome }}</span>
+                                <span class="text-gray-500 text-xs">@{{ u.username }}</span>
+                                {% if u.is_admin %}<span class="ml-2 text-xs bg-red-500/20 text-red-pure px-2 py-0.5 rounded">ADMIN</span>{% endif %}
+                            </td>
+                            <td class="px-4 py-3 text-gray-400">{{ u.email }}</td>
+                            <td class="px-4 py-3">
+                                {% if u.stato == 'attivo' %}
+                                <span class="text-green-400">attivo</span>
+                                {% else %}
+                                <span class="text-red-400">{{ u.stato }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="px-4 py-3">
+                                <div class="flex gap-2">
+                                    {% if u.stato == 'attivo' %}
+                                    <form method="post" action="/admin/ban/{{ u.id }}">
+                                        <button class="text-xs bg-red-500/20 text-red-pure px-3 py-1 rounded hover:bg-red-500/40">Banna</button>
+                                    </form>
+                                    {% else %}
+                                    <form method="post" action="/admin/unban/{{ u.id }}">
+                                        <button class="text-xs bg-green-500/20 text-green-400 px-3 py-1 rounded hover:bg-green-500/40">Riattiva</button>
+                                    </form>
+                                    {% endif %}
+                                    {% if not u.is_admin %}
+                                    <form method="post" action="/admin/delete/{{ u.id }}" onsubmit="return confirm('Eliminare questo utente?')">
+                                        <button class="text-xs bg-white/10 text-gray-400 px-3 py-1 rounded hover:bg-white/20">Elimina</button>
+                                    </form>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Recent matches -->
+        <h2 class="font-hot text-2xl tracking-wide mb-4">ULTIMI MATCH</h2>
+        <div class="bg-white/5 border border-white/10 rounded-xl p-4 space-y-2 mb-10">
+            {% for m in matches %}
+            <div class="flex justify-between items-center py-2 border-b border-white/5 text-sm">
+                <span>{{ m.nome1 }} ↔ {{ m.nome2 }}</span>
+                <span class="text-gray-500 text-xs">{{ m.data_match }}</span>
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-sm">Nessun match</p>
+            {% endfor %}
+        </div>
+
+    </div>
+</body>
+</html>

@@ -30,7 +30,7 @@
             <h1 class="font-hot text-4xl tracking-wide">UTENTI</h1>
             <p class="text-gray-500 text-sm">{{ users|length }} utenti in questa pagina</p>
         </div>
-        <button type="button" class="bg-[#ff0000] text-white font-semibold px-4 py-2.5 rounded-lg text-sm shadow-[0_0_20px_rgba(255,0,0,0.35)]">
+        <button type="button" onclick="openCreateUser()" class="bg-[#ff0000] text-white font-semibold px-4 py-2.5 rounded-lg text-sm shadow-[0_0_20px_rgba(255,0,0,0.35)]">
             + CREA UTENTE
         </button>
     </div>
@@ -50,6 +50,20 @@
                class="flex-1 rounded-lg px-4 py-3 text-sm">
         <button class="bg-[#ff0000] px-5 py-3 rounded-lg font-semibold text-sm">CERCA</button>
     </form>
+
+
+    {% if request.query_params.get('created') %}
+    <div class="mb-4 bg-green-500/20 border border-green-500/40 text-green-300 text-center py-2 rounded-xl text-sm">Utente creato (ID {{ request.query_params.get('created') }})</div>
+    {% endif %}
+    {% if request.query_params.get('err') == 'crea_campi' %}
+    <div class="mb-4 bg-red-500/20 border border-red-500 text-red-300 text-center py-2 rounded-xl text-sm">Nome, email e password obbligatori</div>
+    {% elif request.query_params.get('err') == 'crea_esiste' %}
+    <div class="mb-4 bg-red-500/20 border border-red-500 text-red-300 text-center py-2 rounded-xl text-sm">Email o username già in uso</div>
+    {% elif request.query_params.get('err') == 'crea_pass' %}
+    <div class="mb-4 bg-red-500/20 border border-red-500 text-red-300 text-center py-2 rounded-xl text-sm">Password troppo corta (min 4)</div>
+    {% elif request.query_params.get('err') == 'crea_db' %}
+    <div class="mb-4 bg-red-500/20 border border-red-500 text-red-300 text-center py-2 rounded-xl text-sm">Errore database</div>
+    {% endif %}
 
     <!-- Table -->
     <div class="overflow-x-auto border border-white/10 rounded-xl">
@@ -138,6 +152,78 @@
         </table>
     </div>
 </div>
+
+
+<!-- Modal CREA UTENTE -->
+<div id="create-user-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-3">
+  <div class="bg-[#0a0a0a] border border-white/10 rounded-2xl w-full max-w-md max-h-[94vh] overflow-y-auto shadow-[0_0_40px_rgba(255,0,0,0.15)]">
+    <div class="px-4 py-3 flex items-center justify-between border-b border-white/10 sticky top-0 bg-[#0a0a0a]">
+      <div class="font-hot text-xl tracking-wide"><span class="text-red-pure">+</span> CREA UTENTE</div>
+      <button type="button" onclick="closeCreateUser()" class="text-gray-400 text-xl">✕</button>
+    </div>
+    <form method="post" action="/admin/create-user" class="p-4 space-y-3">
+      <div>
+        <label class="text-[10px] text-gray-500 tracking-wider">NOME *</label>
+        <input name="nome" required class="w-full rounded-lg px-3 py-2.5 text-sm mt-1 bg-black border border-white/15 text-white">
+      </div>
+      <div>
+        <label class="text-[10px] text-gray-500 tracking-wider">USERNAME</label>
+        <input name="username" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1 bg-black border border-white/15 text-white" placeholder="opzionale (da email se vuoto)">
+      </div>
+      <div>
+        <label class="text-[10px] text-gray-500 tracking-wider">EMAIL *</label>
+        <input name="email" type="email" required class="w-full rounded-lg px-3 py-2.5 text-sm mt-1 bg-black border border-white/15 text-white">
+      </div>
+      <div>
+        <label class="text-[10px] text-gray-500 tracking-wider">PASSWORD *</label>
+        <input name="password" type="text" required minlength="4" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1 bg-black border border-white/15 text-white" placeholder="min 4 caratteri">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-[10px] text-gray-500 tracking-wider">GENERE</label>
+          <select name="genere" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1 bg-black border border-white/15 text-white">
+            <option value="">—</option>
+            <option value="uomo">Uomo</option>
+            <option value="donna">Donna</option>
+            <option value="altro">Altro</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-[10px] text-gray-500 tracking-wider">CITTÀ</label>
+          <input name="citta" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1 bg-black border border-white/15 text-white">
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-[10px] text-gray-500 tracking-wider">RUOLO</label>
+          <select name="ruolo" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1 bg-black border border-white/15 text-white">
+            <option value="user">Utente</option>
+            <option value="mod">Moderatore</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-[10px] text-gray-500 tracking-wider">INCANTESIMI</label>
+          <input name="credits" type="number" value="0" min="0" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1 bg-black border border-white/15 text-white">
+        </div>
+      </div>
+      <button type="submit" class="w-full bg-[#ff0000] text-white font-semibold py-3.5 rounded-xl mt-2 shadow-[0_0_24px_rgba(255,0,0,0.35)]">
+        CREA ACCOUNT
+      </button>
+    </form>
+  </div>
+</div>
+<script>
+function openCreateUser() {
+  document.getElementById('create-user-modal').classList.remove('hidden');
+}
+function closeCreateUser() {
+  document.getElementById('create-user-modal').classList.add('hidden');
+}
+document.getElementById('create-user-modal')?.addEventListener('click', function(e) {
+  if (e.target === this) closeCreateUser();
+});
+</script>
 
 <!-- ===================== MODAL GESTISCI ===================== -->
 <div id="manage-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-3">

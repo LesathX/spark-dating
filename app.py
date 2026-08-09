@@ -1893,6 +1893,64 @@ async def admin_user_get(req: Request, user_id: int):
 
 
 
+
+
+@app.post("/admin/create-user")
+async def admin_create_user(req: Request):
+    admin = require_admin(req)
+    if not admin:
+        return RedirectResponse("/login", 303)
+    form = await req.form()
+    nome = (form.get("nome") or "").strip()
+    username = (form.get("username") or "").strip()
+    email = (form.get("email") or "").strip().lower()
+    password = (form.get("password") or "").strip()
+    ruolo = form.get("ruolo") or "user"
+    credits = form.get("credits") or "0"
+    genere = form.get("genere") or None
+    citta = form.get("citta") or None
+
+    if not nome or not email or not password:
+        return RedirectResponse("/admin?err=crea_campi", 303)
+    if len(password) < 4:
+        return RedirectResponse("/admin?err=crea_pass", 303)
+    if not username:
+        username = email.split("@")[0][:20]
+
+    is_admin = 1 if ruolo == "admin" else 0
+    is_mod = 1 if ruolo == "mod" else 0
+    try:
+        cr = int(credits)
+    except Exception:
+        cr = 0
+
+    pwd_hash = hash_password(password)
+    c = db()
+    cur = c.cursor()
+    try:
+        # email unica
+        cur.execute("SELECT id FROM users WHERE email=%s OR username=%s", (email, username))
+        if cur.fetchone():
+            cur.close()
+            c.close()
+            return RedirectResponse("/admin?err=crea_esiste", 303)
+        cur.execute(
+            """INSERT INTO users (nome, username, email, password_hash, ruolo, is_admin, is_mod, credits, stato, genere, citta)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'attivo',%s,%s) RETURNING id""",
+            (nome, username, email, pwd_hash, ruolo, is_admin, is_mod, cr, genere, citta),
+        )
+        new_id = cur.fetchone()["id"]
+        c.commit()
+        cur.close()
+        c.close()
+        return RedirectResponse(f"/admin?created={new_id}", 303)
+    except Exception as e:
+        c.rollback()
+        cur.close()
+        c.close()
+        print("admin_create_user:", e)
+        return RedirectResponse("/admin?err=crea_db", 303)
+
 @app.post("/admin/user/{user_id}/update")
 async def admin_user_update(req: Request, user_id: int):
     admin = require_admin(req)
@@ -2132,6 +2190,9 @@ async def admin_user_get(req: Request, user_id: int):
     d.pop("password_hash", None)
     d["restrictions"] = get_restrictions(user_id)
     return JSONResponse({"ok": True, "user": d})
+
+
+
 
 
 @app.post("/admin/user/{user_id}/update")

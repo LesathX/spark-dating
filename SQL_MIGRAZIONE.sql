@@ -47,3 +47,16 @@ CREATE TABLE IF NOT EXISTS backups_log (
 UPDATE users SET credits = 50 WHERE credits IS NULL;
 UPDATE users SET ruolo = 'admin' WHERE is_admin = 1;
 UPDATE users SET ruolo = 'user' WHERE ruolo IS NULL;
+
+
+-- Accesso foto private (consenso in chat, pagato con crediti non rimborsabili)
+CREATE TABLE IF NOT EXISTS photo_access_requests (
+    id SERIAL PRIMARY KEY,
+    from_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    to_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    credits_paid INTEGER NOT NULL DEFAULT 25,
+    status VARCHAR(20) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    decided_at TIMESTAMP,
+    UNIQUE(from_user_id, to_user_id)
+);

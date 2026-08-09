@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from fastapi import FastAPI, Request, Form, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, Form, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -19,8 +19,8 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "mycheating_secret_key_2026")
 app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, session_cookie="session", max_age=2592000, same_site="lax", https_only=False)
 
-if (BASE_DIR / "static").exists():
-    app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+(BASE_DIR / "static" / "uploads").mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -138,6 +138,8 @@ def haversine_km(lat1, lon1, lat2, lon2):
 
 
 # ============== INCANTESIMI (costi in crediti) ==============
+PHOTO_ACCESS_COST = 25  # crediti non rimborsabili per richiedere foto private
+
 SPELLS = {
     "superlike": {"cost": 5, "label": "Super Like"},
     "messaggio_swipe": {"cost": 10, "label": "Messaggio al like"},
@@ -685,9 +687,37 @@ async def chat_page(req: Request, conversation_id: int):
     c.commit()
     cur.close()
     c.close()
+    # stato accesso foto private
+    photo_access = None  # none | pending_out | pending_in | approved
+    pending_request = None
+    try:
+        c2 = db()
+        cur2 = c2.cursor()
+        cur2.execute(
+            "SELECT * FROM photo_access_requests WHERE from_user_id=%s AND to_user_id=%s",
+            (user["id"], altro["id"]),
+        )
+        out_req = cur2.fetchone()
+        cur2.execute(
+            "SELECT * FROM photo_access_requests WHERE from_user_id=%s AND to_user_id=%s AND status='pending'",
+            (altro["id"], user["id"]),
+        )
+        in_req = cur2.fetchone()
+        if out_req:
+            photo_access = out_req["status"]  # pending / approved / denied
+        if in_req:
+            pending_request = dict(in_req)
+        cur2.close()
+        c2.close()
+    except Exception as e:
+        print("chat photo state:", e)
+
     return templates.TemplateResponse("chat.html", {
         "request": req, "user": user, "altro": altro, "conversation_id": conversation_id,
-        "messaggi": [dict(m) for m in messaggi], "unread": unread_count(user["id"])
+        "messaggi": [dict(m) for m in messaggi], "unread": unread_count(user["id"]),
+        "photo_access": photo_access,
+        "pending_request": pending_request,
+        "photo_cost": PHOTO_ACCESS_COST,
     })
 
 @app.post("/chat/{conversation_id}/send")
@@ -1088,6 +1118,7 @@ async def admin_remove_admin(req: Request, user_id: int):
 
 
 # ============== FOTO PROFILO ==============
+
 @app.get("/photos", response_class=HTMLResponse)
 async def photos_page(req: Request):
     user = current_user(req)
@@ -1103,31 +1134,62 @@ async def photos_page(req: Request):
     cur.close()
     c.close()
     return templates.TemplateResponse("photos.html", {
-        "request": req, "user": user, "photos": photos, "unread": unread_count(user["id"])
+        "request": req, "user": user, "photos": photos, "unread": unread_count(user["id"]),
+        "err": req.query_params.get("err"),
     })
 
 
-@app.post("/photos/add")
-async def photos_add(req: Request, url: str = Form(...), is_private: int = Form(0)):
+@app.post("/photos/upload")
+async def photos_upload(
+    req: Request,
+    file: UploadFile = File(...),
+    is_private: int = Form(0),
+):
     user = current_user(req)
     if not user:
         return RedirectResponse("/login", 303)
-    url = url.strip()
-    if not url.startswith("http"):
-        return RedirectResponse("/photos?err=url", 303)
+
+    content_type = (file.content_type or "").lower()
+    if not content_type.startswith("image/"):
+        return RedirectResponse("/photos?err=tipo", 303)
+
+    data = await file.read()
+    if len(data) > 8 * 1024 * 1024:  # max 8MB
+        return RedirectResponse("/photos?err=grande", 303)
+
+    import uuid
+    ext = "jpg"
+    if "png" in content_type:
+        ext = "png"
+    elif "webp" in content_type:
+        ext = "webp"
+    elif "gif" in content_type:
+        ext = "gif"
+
+    user_dir = BASE_DIR / "static" / "uploads" / str(user["id"])
+    user_dir.mkdir(parents=True, exist_ok=True)
+    fname = f"{uuid.uuid4().hex}.{ext}"
+    fpath = user_dir / fname
+    fpath.write_bytes(data)
+    url = f"/static/uploads/{user['id']}/{fname}"
+
     c = db()
     cur = c.cursor()
     try:
         cur.execute(
             "INSERT INTO user_photos (user_id, url, is_private) VALUES (%s, %s, %s)",
-            (user["id"], url[:500], 1 if is_private else 0),
+            (user["id"], url, 1 if int(is_private) else 0),
         )
-        if not is_private:
-            cur.execute("UPDATE users SET foto_principale_url=%s WHERE id=%s AND (foto_principale_url IS NULL OR foto_principale_url='')", (url[:500], user["id"]))
+        if not int(is_private):
+            cur.execute(
+                "UPDATE users SET foto_principale_url=%s WHERE id=%s AND (foto_principale_url IS NULL OR foto_principale_url='')",
+                (url, user["id"]),
+            )
         c.commit()
     except Exception as e:
         c.rollback()
-        print("photos_add:", e)
+        print("photos_upload:", e)
+        return RedirectResponse("/photos?err=db", 303)
     finally:
         cur.close()
         c.close()
@@ -1141,11 +1203,218 @@ async def photos_delete(req: Request, photo_id: int):
         return RedirectResponse("/login", 303)
     c = db()
     cur = c.cursor()
-    cur.execute("DELETE FROM user_photos WHERE id=%s AND user_id=%s", (photo_id, user["id"]))
-    c.commit()
+    cur.execute("SELECT url FROM user_photos WHERE id=%s AND user_id=%s", (photo_id, user["id"]))
+    row = cur.fetchone()
+    if row:
+        try:
+            rel = row["url"]
+            if rel.startswith("/static/"):
+                fp = BASE_DIR / rel.lstrip("/")
+                if fp.exists():
+                    fp.unlink()
+        except Exception:
+            pass
+        cur.execute("DELETE FROM user_photos WHERE id=%s AND user_id=%s", (photo_id, user["id"]))
+        c.commit()
     cur.close()
     c.close()
     return RedirectResponse("/photos", 303)
+
+
+def has_photo_access(viewer_id, owner_id):
+    """True se viewer può vedere le foto private di owner."""
+    if viewer_id == owner_id:
+        return True
+    try:
+        c = db()
+        cur = c.cursor()
+        cur.execute(
+            """SELECT id FROM photo_access_requests
+               WHERE from_user_id=%s AND to_user_id=%s AND status='approved'""",
+            (viewer_id, owner_id),
+        )
+        ok = cur.fetchone() is not None
+        cur.close()
+        c.close()
+        return ok
+    except Exception:
+        return False
+
+
+@app.post("/photos/request-access/{to_user_id}")
+async def photos_request_access(req: Request, to_user_id: int, conversation_id: int = Form(...)):
+    """Richiede accesso alle foto private. Crediti scalati subito e NON rimborsabili."""
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    if to_user_id == user["id"]:
+        return RedirectResponse(f"/chat/{conversation_id}", 303)
+
+    # già approvato?
+    if has_photo_access(user["id"], to_user_id):
+        return RedirectResponse(f"/chat/{conversation_id}?photo=ok", 303)
+
+    c = db()
+    cur = c.cursor()
+    # pending già esistente?
+    try:
+        cur.execute(
+            "SELECT id, status FROM photo_access_requests WHERE from_user_id=%s AND to_user_id=%s",
+            (user["id"], to_user_id),
+        )
+        existing = cur.fetchone()
+        if existing and existing["status"] == "pending":
+            cur.close()
+            c.close()
+            return RedirectResponse(f"/chat/{conversation_id}?photo=pending", 303)
+        if existing and existing["status"] == "approved":
+            cur.close()
+            c.close()
+            return RedirectResponse(f"/chat/{conversation_id}?photo=ok", 303)
+    except Exception as e:
+        print("photo access check:", e)
+
+    cur.close()
+    c.close()
+
+    # paga crediti (non rimborsabili anche se rifiutato)
+    if not spend_credits(user["id"], PHOTO_ACCESS_COST, "richiesta_foto_private", to_user_id):
+        return RedirectResponse(f"/chat/{conversation_id}?err=crediti", 303)
+
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute(
+            """INSERT INTO photo_access_requests (from_user_id, to_user_id, credits_paid, status)
+               VALUES (%s, %s, %s, 'pending')
+               ON CONFLICT (from_user_id, to_user_id)
+               DO UPDATE SET status='pending', credits_paid=%s, created_at=CURRENT_TIMESTAMP, decided_at=NULL""",
+            (user["id"], to_user_id, PHOTO_ACCESS_COST, PHOTO_ACCESS_COST),
+        )
+        cur.execute(
+            """INSERT INTO notifications (user_id, tipo, titolo, contenuto, related_id)
+               VALUES (%s, 'richiesta_foto', 'Richiesta foto private',
+                       %s, %s)""",
+            (
+                to_user_id,
+                f"{user.get('nome', 'Qualcuno')} vuole vedere le tue foto private (ha già pagato i crediti).",
+                conversation_id,
+            ),
+        )
+        # messaggio di sistema in chat
+        cur.execute(
+            """INSERT INTO messages (conversation_id, sender_id, tipo, contenuto)
+               VALUES (%s, %s, 'sistema', %s)""",
+            (
+                conversation_id,
+                user["id"],
+                f"📷 Ha richiesto l'accesso alle foto private ({PHOTO_ACCESS_COST} crediti, non rimborsabili). In attesa del tuo consenso.",
+            ),
+        )
+        c.commit()
+    except Exception as e:
+        c.rollback()
+        print("request access error:", e)
+    finally:
+        cur.close()
+        c.close()
+
+    await manager.send(to_user_id, {
+        "type": "richiesta_foto",
+        "title": "Richiesta foto private",
+        "message": f"{user.get('nome', 'Qualcuno')} chiede di vedere le tue foto private",
+    })
+    return RedirectResponse(f"/chat/{conversation_id}?photo=sent", 303)
+
+
+@app.post("/photos/decide/{request_id}")
+async def photos_decide(req: Request, request_id: int, decision: str = Form(...), conversation_id: int = Form(...)):
+    """Approva o rifiuta. I crediti NON vengono rimborsati."""
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    if decision not in ("approved", "denied"):
+        return RedirectResponse(f"/chat/{conversation_id}", 303)
+
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute(
+            "SELECT * FROM photo_access_requests WHERE id=%s AND to_user_id=%s AND status='pending'",
+            (request_id, user["id"]),
+        )
+        row = cur.fetchone()
+        if not row:
+            cur.close()
+            c.close()
+            return RedirectResponse(f"/chat/{conversation_id}", 303)
+        cur.execute(
+            "UPDATE photo_access_requests SET status=%s, decided_at=CURRENT_TIMESTAMP WHERE id=%s",
+            (decision, request_id),
+        )
+        from_id = row["from_user_id"]
+        if decision == "approved":
+            msg = f"✅ {user.get('nome', 'Utente')} ha accettato: puoi vedere le foto private."
+            titolo = "Foto private sbloccate"
+            contenuto = f"{user.get('nome')} ha accettato la tua richiesta."
+        else:
+            msg = f"❌ {user.get('nome', 'Utente')} ha rifiutato l'accesso alle foto private. I crediti non vengono rimborsati."
+            titolo = "Richiesta foto rifiutata"
+            contenuto = f"{user.get('nome')} ha rifiutato. Crediti non rimborsati."
+        cur.execute(
+            "INSERT INTO messages (conversation_id, sender_id, tipo, contenuto) VALUES (%s, %s, 'sistema', %s)",
+            (conversation_id, user["id"], msg),
+        )
+        cur.execute(
+            "INSERT INTO notifications (user_id, tipo, titolo, contenuto, related_id) VALUES (%s, 'foto_decisione', %s, %s, %s)",
+            (from_id, titolo, contenuto, conversation_id),
+        )
+        c.commit()
+        await manager.send(from_id, {"type": "foto_decisione", "title": titolo, "message": contenuto})
+    except Exception as e:
+        c.rollback()
+        print("photos_decide:", e)
+    finally:
+        cur.close()
+        c.close()
+    return RedirectResponse(f"/chat/{conversation_id}", 303)
+
+
+@app.get("/photos/view/{owner_id}", response_class=HTMLResponse)
+async def photos_view(req: Request, owner_id: int):
+    """Vede le foto di un utente: pubbliche sempre; private solo con consenso."""
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    cur.execute("SELECT id, nome, username FROM users WHERE id=%s", (owner_id,))
+    owner = cur.fetchone()
+    if not owner:
+        cur.close()
+        c.close()
+        return RedirectResponse("/matches", 303)
+    owner = dict(owner)
+    can_private = has_photo_access(user["id"], owner_id)
+    cur.execute(
+        "SELECT * FROM user_photos WHERE user_id=%s AND is_private=0 ORDER BY ordine, id",
+        (owner_id,),
+    )
+    public = [dict(p) for p in cur.fetchall()]
+    private = []
+    if can_private:
+        cur.execute(
+            "SELECT * FROM user_photos WHERE user_id=%s AND is_private=1 ORDER BY ordine, id",
+            (owner_id,),
+        )
+        private = [dict(p) for p in cur.fetchall()]
+    cur.close()
+    c.close()
+    return templates.TemplateResponse("photos_view.html", {
+        "request": req, "user": user, "owner": owner,
+        "public": public, "private": private, "can_private": can_private,
+        "unread": unread_count(user["id"]),
+    })
 
 
 # ============== INCANTESIMI ==============

@@ -25,6 +25,53 @@
         </div>
     </div>
 
+    
+    <!-- Foto private: richiesta / consenso -->
+    <div class="px-4 py-2 border-b border-white/5 bg-black/40">
+        {% if pending_request %}
+        <div class="bg-[#ff0000]/15 border border-[#ff0000]/40 rounded-xl p-3 text-sm">
+            <p class="mb-2">📷 <strong>{{ altro.nome }}</strong> ha chiesto di vedere le tue foto private
+            (ha già pagato {{ pending_request.credits_paid }} crediti, <span class="text-red-pure">non rimborsabili</span>).</p>
+            <div class="flex gap-2">
+                <form method="post" action="/photos/decide/{{ pending_request.id }}" class="flex-1">
+                    <input type="hidden" name="conversation_id" value="{{ conversation_id }}">
+                    <input type="hidden" name="decision" value="approved">
+                    <button class="w-full py-2 rounded-lg bg-green-600 text-white text-sm font-semibold">Accetta</button>
+                </form>
+                <form method="post" action="/photos/decide/{{ pending_request.id }}" class="flex-1">
+                    <input type="hidden" name="conversation_id" value="{{ conversation_id }}">
+                    <input type="hidden" name="decision" value="denied">
+                    <button class="w-full py-2 rounded-lg bg-white/10 text-gray-300 text-sm">Rifiuta</button>
+                </form>
+            </div>
+        </div>
+        {% elif photo_access == 'approved' %}
+        <div class="flex items-center justify-between gap-2 text-sm">
+            <span class="text-green-400">✅ Puoi vedere le foto private</span>
+            <a href="/photos/view/{{ altro.id }}" class="text-[#ff0000] font-semibold">Apri foto →</a>
+        </div>
+        {% elif photo_access == 'pending' %}
+        <p class="text-sm text-yellow-400/90">⏳ Richiesta foto private in attesa di risposta…</p>
+        {% elif photo_access == 'denied' %}
+        <div class="flex items-center justify-between gap-2 text-sm">
+            <span class="text-gray-500">Richiesta rifiutata (crediti non rimborsati)</span>
+            <form method="post" action="/photos/request-access/{{ altro.id }}">
+                <input type="hidden" name="conversation_id" value="{{ conversation_id }}">
+                <button class="text-[#ff0000] text-xs">Richiesta di nuovo ({{ photo_cost }} cr.)</button>
+            </form>
+        </div>
+        {% else %}
+        <form method="post" action="/photos/request-access/{{ altro.id }}" class="flex items-center justify-between gap-2"
+              onsubmit="return confirm('Pagherai {{ photo_cost }} crediti NON RIMBORSABILI, anche se rifiuta. Continuare?')">
+            <input type="hidden" name="conversation_id" value="{{ conversation_id }}">
+            <span class="text-xs text-gray-400">Foto private di {{ altro.nome }}</span>
+            <button class="bg-[#ff0000]/20 border border-[#ff0000]/40 text-[#ff0000] text-xs px-3 py-1.5 rounded-lg font-semibold">
+                Richiedi ({{ photo_cost }} crediti)
+            </button>
+        </form>
+        {% endif %}
+    </div>
+
     <div class="flex-1 overflow-y-auto px-4 py-4 space-y-3" id="messages">
         {% for msg in messaggi %}
         <div class="flex {% if msg.sender_id == user.id %}justify-end{% else %}justify-start{% endif %}">

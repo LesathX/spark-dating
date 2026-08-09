@@ -11,7 +11,6 @@
         .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
         .text-red-pure { color: #ff0000; }
         .bg-red-hot { background: #ff0000; }
-        input:focus { border-color: #ff0000 !important; outline: none; }
     </style>
 </head>
 <body class="text-white min-h-screen pb-28">
@@ -20,16 +19,30 @@
         <a href="/profile" class="text-sm text-gray-400">← Profilo</a>
     </div>
     <div class="max-w-md mx-auto px-4 py-6">
-        <form method="post" action="/photos/add" class="bg-white/5 border border-white/10 rounded-2xl p-4 mb-6 space-y-3">
-            <h2 class="font-hot text-lg">AGGIUNGI FOTO</h2>
-            <p class="text-xs text-gray-500">Incolla un URL immagine (Imgur, Catbox, ecc.)</p>
-            <input type="url" name="url" required placeholder="https://..." class="w-full bg-transparent border border-white/15 rounded-xl px-4 py-3 text-sm">
+        {% if err == 'tipo' %}
+        <div class="mb-4 bg-red-500/20 border border-red-500 text-red-300 text-sm text-center py-2 rounded-xl">Solo immagini (jpg, png, webp…)</div>
+        {% elif err == 'grande' %}
+        <div class="mb-4 bg-red-500/20 border border-red-500 text-red-300 text-sm text-center py-2 rounded-xl">File troppo grande (max 8 MB)</div>
+        {% elif err == 'db' %}
+        <div class="mb-4 bg-red-500/20 border border-red-500 text-red-300 text-sm text-center py-2 rounded-xl">Errore salvataggio</div>
+        {% endif %}
+
+        <form method="post" action="/photos/upload" enctype="multipart/form-data"
+              class="bg-white/5 border border-white/10 rounded-2xl p-4 mb-6 space-y-3">
+            <h2 class="font-hot text-lg">CARICA DAL TELEFONO / PC</h2>
+            <input type="file" name="file" accept="image/*" required capture="environment"
+                   class="w-full text-sm text-gray-300 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-[#ff0000] file:text-white file:font-semibold">
             <label class="flex items-center gap-2 text-sm text-gray-300">
                 <input type="checkbox" name="is_private" value="1" class="accent-[#ff0000]">
-                Foto privata (solo match)
+                <span>Foto <strong class="text-red-pure">privata</strong> — solo chi ha il tuo consenso in chat (a pagamento)</span>
             </label>
-            <button class="w-full bg-red-hot text-white font-semibold py-3 rounded-xl">Carica</button>
+            <button type="submit" class="w-full bg-red-hot text-white font-semibold py-3 rounded-xl">Carica foto</button>
         </form>
+
+        <p class="text-xs text-gray-500 mb-4">
+            Le foto private non si vedono in Scopri. Un match può richiederle in chat pagando crediti.
+            Tu decidi se accettare. I crediti non vengono mai rimborsati.
+        </p>
 
         <h2 class="font-hot text-lg mb-3">PUBBLICHE</h2>
         <div class="grid grid-cols-2 gap-3 mb-6">
@@ -48,7 +61,7 @@
         <h2 class="font-hot text-lg mb-3">PRIVATE 🔒</h2>
         <div class="grid grid-cols-2 gap-3">
             {% for p in photos if p.is_private %}
-            <div class="relative rounded-xl overflow-hidden border border-[#ff0000]/30 aspect-square bg-black">
+            <div class="relative rounded-xl overflow-hidden border border-[#ff0000]/40 aspect-square bg-black">
                 <img src="{{ p.url }}" class="w-full h-full object-cover" alt="">
                 <div class="absolute bottom-0 left-0 right-0 bg-black/70 text-[10px] text-center py-1 text-red-pure">PRIVATA</div>
                 <form method="post" action="/photos/delete/{{ p.id }}" class="absolute top-2 right-2">

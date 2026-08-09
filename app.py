@@ -1942,6 +1942,7 @@ async def admin_user_get(req: Request, user_id: int):
 
 
 
+
 @app.post("/admin/create-user")
 async def admin_create_user(req: Request):
     admin = require_admin(req)
@@ -1954,9 +1955,9 @@ async def admin_create_user(req: Request):
         email = (form.get("email") or "").strip().lower()
         password = (form.get("password") or "").strip()
         ruolo = (form.get("ruolo") or "user").strip()
-        credits = form.get("credits") or "0"
-        genere = form.get("genere") or None
-        citta = form.get("citta") or None
+        credits_raw = form.get("credits") or "0"
+        genere = (form.get("genere") or "altro").strip() or "altro"
+        citta = (form.get("citta") or "").strip() or None
 
         if not nome or not email or not password:
             return RedirectResponse("/admin?err=crea_campi", 303)
@@ -1964,23 +1965,21 @@ async def admin_create_user(req: Request):
             return RedirectResponse("/admin?err=crea_pass", 303)
         if not username:
             username = email.split("@")[0][:20]
-        # username safe
         username = "".join(c for c in username if c.isalnum() or c in "_-")[:30] or "user"
 
         is_admin = 1 if ruolo == "admin" else 0
         is_mod = 1 if ruolo == "mod" else 0
         try:
-            cr = max(0, int(credits))
+            cr = max(0, int(credits_raw))
         except Exception:
             cr = 0
 
-        try:
-            pwd_hash = hash_password(password)
-        except Exception as e:
-            print("hash_password error:", e)
-            # fallback bcrypt diretto
-            import bcrypt as _bc
-            pwd_hash = _bc.hashpw(password.encode("utf-8")[:72], _bc.gensalt()).decode("utf-8")
+        # stessa funzione della registrazione
+        pwd_hash = hash_pw(password)
+
+        # data_nascita fittizia (18 anni) se obbligatoria nel DB
+        from datetime import date
+        data_nascita = date(date.today().year - 25, 1, 1).isoformat()
 
         c = db()
         cur = c.cursor()
@@ -1991,54 +1990,43 @@ async def admin_create_user(req: Request):
                 c.close()
                 return RedirectResponse("/admin?err=crea_esiste", 303)
 
-            new_id = None
-            # tentativo completo
-            attempts = [
-                """INSERT INTO users (nome, username, email, password_hash, ruolo, is_admin, is_mod, credits, stato, genere, citta)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'attivo',%s,%s) RETURNING id""",
-                """INSERT INTO users (nome, username, email, password_hash, is_admin, is_mod, credits, stato, genere, citta)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,'attivo',%s,%s) RETURNING id""",
-                """INSERT INTO users (nome, username, email, password_hash, stato, genere, citta)
-                   VALUES (%s,%s,%s,%s,'attivo',%s,%s) RETURNING id""",
-                """INSERT INTO users (email, password_hash, username, nome, genere, citta)
-                   VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
-            ]
-            params_list = [
-                (nome, username, email, pwd_hash, ruolo, is_admin, is_mod, cr, genere, citta),
-                (nome, username, email, pwd_hash, is_admin, is_mod, cr, genere, citta),
-                (nome, username, email, pwd_hash, genere, citta),
-                (email, pwd_hash, username, nome, genere, citta),
-            ]
-            last_err = None
-            for sql, params in zip(attempts, params_list):
+            # INSERT identico alla registrazione (colonne certe)
+            cur.execute(
+                """INSERT INTO users (email, password_hash, username, nome, data_nascita, genere, orientamento, bio, citta)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                (email, pwd_hash, username, nome, data_nascita, genere, "tutti", None, citta),
+            )
+            row = cur.fetchone()
+            new_id = row["id"]
+            try:
+                cur.execute("INSERT INTO user_preferences (user_id) VALUES (%s)", (new_id,))
+            except Exception:
+                pass
+            c.commit()
+
+            # campi extra opzionali
+            try:
+                cur.execute(
+                    """UPDATE users SET is_admin=%s, is_mod=%s, credits=%s, ruolo=%s, stato='attivo'
+                       WHERE id=%s""",
+                    (is_admin, is_mod, cr, ruolo, new_id),
+                )
+                c.commit()
+            except Exception as e2:
+                c.rollback()
+                print("create user extra fields:", e2)
                 try:
-                    cur.execute(sql, params)
-                    row = cur.fetchone()
-                    new_id = row["id"] if row else None
+                    cur.execute(
+                        "UPDATE users SET is_admin=%s, is_mod=%s WHERE id=%s",
+                        (is_admin, is_mod, new_id),
+                    )
                     c.commit()
-                    # aggiorna ruolo/crediti se colonne esistono (dopo commit insert)
-                    if new_id:
-                        try:
-                            cur.execute(
-                                "UPDATE users SET is_admin=%s, is_mod=%s, credits=COALESCE(%s, credits) WHERE id=%s",
-                                (is_admin, is_mod, cr, new_id),
-                            )
-                            c.commit()
-                        except Exception as ue:
-                            c.rollback()
-                            print("create user role/credits update:", ue)
-                    break
-                except Exception as e:
-                    last_err = e
+                except Exception as e3:
                     c.rollback()
-                    print("create attempt failed:", e)
-                    continue
+                    print("create user flags:", e3)
 
             cur.close()
             c.close()
-            if not new_id:
-                print("admin_create_user final error:", last_err)
-                return RedirectResponse("/admin?err=crea_db", 303)
             return RedirectResponse(f"/admin?created={new_id}", 303)
         except Exception as e:
             try:
@@ -2047,10 +2035,10 @@ async def admin_create_user(req: Request):
                 c.close()
             except Exception:
                 pass
-            print("admin_create_user:", e)
+            print("admin_create_user DB:", type(e).__name__, e)
             return RedirectResponse("/admin?err=crea_db", 303)
     except Exception as e:
-        print("admin_create_user outer:", e)
+        print("admin_create_user outer:", type(e).__name__, e)
         return RedirectResponse("/admin?err=crea_db", 303)
 
 

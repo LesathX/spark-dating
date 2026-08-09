@@ -23,6 +23,8 @@
         <div class="mb-4 bg-red-500/20 border border-red-500 text-red-300 text-sm text-center py-2 rounded-xl">Solo foto o video</div>
         {% elif err == 'grande' %}
         <div class="mb-4 bg-red-500/20 border border-red-500 text-red-300 text-sm text-center py-2 rounded-xl">File troppo grande (max 500 MB)</div>
+        {% elif err == 'storage' %}
+        <div class="mb-4 bg-red-500/20 border border-red-500 text-red-300 text-sm text-center py-2 rounded-xl">Errore Storage Supabase — usa service_role legacy (eyJ…) e verifica bucket gallery. Test: /admin/storage-test</div>
         {% elif err == 'db' %}
         <div class="mb-4 bg-red-500/20 border border-red-500 text-red-300 text-sm text-center py-2 rounded-xl">Errore salvataggio</div>
         {% endif %}

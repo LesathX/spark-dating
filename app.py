@@ -1202,12 +1202,13 @@ async def admin_remove_admin(req: Request, user_id: int):
 # ============== FOTO PROFILO ==============
 
 
+
 def storage_enabled():
     return bool(SUPABASE_URL and SUPABASE_SERVICE_KEY)
 
 
 async def storage_upload(path: str, data: bytes, content_type: str) -> str:
-    """Carica su Supabase Storage e ritorna URL pubblico (o path per privati)."""
+    """Carica su Supabase Storage. Prova POST poi PUT. Ritorna URL pubblico."""
     import httpx
     url = f"{SUPABASE_URL}/storage/v1/object/{STORAGE_BUCKET}/{path}"
     headers = {
@@ -1219,18 +1220,15 @@ async def storage_upload(path: str, data: bytes, content_type: str) -> str:
     async with httpx.AsyncClient(timeout=300.0) as client:
         r = await client.post(url, content=data, headers=headers)
         if r.status_code not in (200, 201):
-            # retry with put
             r = await client.put(url, content=data, headers=headers)
         if r.status_code not in (200, 201):
-            raise RuntimeError(f"Storage upload failed: {r.status_code} {r.text[:300]}")
-    # URL pubblico
+            # messaggio chiaro per i log
+            raise RuntimeError(f"Storage {r.status_code}: {r.text[:500]}")
     return f"{SUPABASE_URL}/storage/v1/object/public/{STORAGE_BUCKET}/{path}"
 
 
 async def storage_upload_stream(path: str, file_obj, content_type: str, max_bytes: int) -> tuple:
-    """Legge a chunk, carica su storage. Ritorna (public_url, size)."""
-    import httpx
-    # Per file grandi: buffer su temp poi upload (Supabase REST vuole body completo in una request)
+    """Buffer su temp, upload. Ritorna (public_url, size)."""
     import tempfile
     size = 0
     with tempfile.NamedTemporaryFile(delete=False) as tmp:
@@ -1261,9 +1259,7 @@ async def storage_upload_stream(path: str, file_obj, content_type: str, max_byte
 
 
 async def storage_signed_url(path: str, expires_sec: int = 3600) -> str:
-    """URL firmato per file privati."""
     import httpx
-    # path relativo nel bucket
     url = f"{SUPABASE_URL}/storage/v1/object/sign/{STORAGE_BUCKET}/{path}"
     headers = {
         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
@@ -1279,6 +1275,51 @@ async def storage_signed_url(path: str, expires_sec: int = 3600) -> str:
         if signed.startswith("http"):
             return signed
         return f"{SUPABASE_URL}/storage/v1{signed}"
+
+
+@app.get("/admin/storage-test")
+async def admin_storage_test(req: Request):
+    """Test rapido Storage (solo admin). Visita /admin/storage-test"""
+    if not require_admin(req):
+        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    info = {
+        "supabase_url": SUPABASE_URL,
+        "bucket": STORAGE_BUCKET,
+        "key_set": bool(SUPABASE_SERVICE_KEY),
+        "key_prefix": (SUPABASE_SERVICE_KEY[:12] + "...") if SUPABASE_SERVICE_KEY else None,
+        "storage_enabled": storage_enabled(),
+    }
+    if not storage_enabled():
+        return JSONResponse({"ok": False, "info": info, "error": "missing env"})
+    try:
+        import httpx
+        # list buckets
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            headers = {
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "apikey": SUPABASE_SERVICE_KEY,
+            }
+            r = await client.get(f"{SUPABASE_URL}/storage/v1/bucket", headers=headers)
+            info["list_buckets_status"] = r.status_code
+            info["list_buckets_body"] = r.text[:500]
+            # try tiny upload
+            test_path = "_test/ping.txt"
+            up = await client.post(
+                f"{SUPABASE_URL}/storage/v1/object/{STORAGE_BUCKET}/{test_path}",
+                content=b"ok",
+                headers={
+                    **headers,
+                    "Content-Type": "text/plain",
+                    "x-upsert": "true",
+                },
+            )
+            info["upload_status"] = up.status_code
+            info["upload_body"] = up.text[:500]
+            info["ok"] = up.status_code in (200, 201)
+        return JSONResponse(info)
+    except Exception as e:
+        info["exception"] = str(e)
+        return JSONResponse({"ok": False, "info": info})
 
 
 @app.get("/gallery", response_class=HTMLResponse)
@@ -1377,6 +1418,7 @@ async def photos_upload(
             return RedirectResponse("/gallery?err=grande", 303)
         except Exception as e:
             print("supabase upload error:", e)
+            # err detail solo nei log; UI generica
             return RedirectResponse("/gallery?err=storage", 303)
     else:
         # fallback locale (dev)

@@ -191,5 +191,83 @@
         connect();
     })();
     </script>
+
+{% if show_verify %}
+<div id="verify-modal" class="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-4">
+  <div class="w-full max-w-sm bg-[#111] border border-white/15 rounded-2xl p-5 shadow-[0_0_40px_rgba(255,0,0,0.2)]">
+    <div class="flex items-start justify-between gap-2 mb-2">
+      <h2 class="font-hot text-2xl tracking-wide text-[#ff0000]">VERIFICA ACCOUNT</h2>
+      <form method="post" action="/verify/dismiss">
+        <button type="submit" class="text-gray-500 text-xl leading-none">✕</button>
+      </form>
+    </div>
+
+    {% if verify_err == 'numero' %}
+    <p class="text-xs text-red-400 mb-2">Numero non valido</p>
+    {% elif verify_err == 'usato' %}
+    <p class="text-xs text-red-400 mb-2">Questo numero è già usato da un altro account verificato</p>
+    {% elif verify_err == 'codice' %}
+    <p class="text-xs text-red-400 mb-2">Codice errato o scaduto (max 10 minuti)</p>
+    {% elif verify_err == 'limit' %}
+    <p class="text-xs text-red-400 mb-2">Troppi tentativi, riprova tra un’ora</p>
+    {% endif %}
+
+    {% if verify_step == 'ok' %}
+    <p class="text-green-400 text-sm mb-3">✅ Account verificato! Hai la spunta 🔥 sul profilo.</p>
+    <a href="/discover" class="block text-center bg-[#ff0000] py-2.5 rounded-xl font-semibold text-sm">Continua</a>
+    {% elif verify_step == 'otp' %}
+    <p class="text-sm text-gray-400 mb-3">
+      Abbiamo inviato un <strong class="text-white">codice OTP</strong> alla tua email
+      <strong class="text-white">{{ user.email }}</strong>.<br>
+      Numero collegato (solo tu lo vedi): <strong class="text-white">{{ pending_phone }}</strong><br>
+      <span class="text-yellow-400/90">Il codice scade tra 10 minuti.</span>
+    </p>
+    {% if test_otp %}
+    <p class="text-xs text-yellow-300 bg-yellow-900/20 border border-yellow-500/30 rounded-lg px-3 py-2 mb-3">
+      🧪 Modalità test (SMTP non configurato): codice = <span class="font-mono text-base">{{ test_otp }}</span>
+    </p>
+    {% endif %}
+    <form method="post" action="/verify/confirm" class="space-y-3">
+      <input name="otp" type="text" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" required
+             placeholder="Codice a 6 cifre"
+             class="w-full bg-black border border-white/20 rounded-xl px-4 py-3 text-center text-xl tracking-[0.3em] outline-none focus:border-[#ff0000]">
+      <button class="w-full bg-[#ff0000] py-2.5 rounded-xl font-semibold text-sm">Conferma e ottieni 🔥</button>
+    </form>
+    <form method="post" action="/verify/start" class="mt-2">
+      <input type="hidden" name="prefix" value="+39">
+      <input type="hidden" name="phone" value="{{ pending_phone or '' }}">
+      <button class="w-full text-xs text-gray-500 py-2">Rinvia codice</button>
+    </form>
+    {% else %}
+    <p class="text-sm text-gray-400 mb-3">
+      Conferma il tuo account con il <strong class="text-white">numero di telefono</strong>.
+      Il numero è <strong class="text-[#ff0000]">visibile SOLO a te</strong>: non viene pubblicato né mostrato agli altri utenti.
+    </p>
+    <p class="text-xs text-gray-500 mb-4">
+      Dopo aver inserito il numero ti invieremo un <strong class="text-white">codice OTP sulla tua email</strong>
+      ({{ user.email }}). Inserendolo correttamente il tuo profilo avrà la spunta <strong class="text-orange-400">🔥 verificato</strong>.
+    </p>
+    <form method="post" action="/verify/start" class="space-y-3">
+      <div class="flex gap-2">
+        <select name="prefix" class="bg-black border border-white/20 rounded-xl px-2 py-2.5 text-sm w-24">
+          <option value="+39" selected>+39</option>
+          <option value="+33">+33</option>
+          <option value="+41">+41</option>
+          <option value="+49">+49</option>
+          <option value="+34">+34</option>
+        </select>
+        <input name="phone" type="tel" required placeholder="333 1234567"
+               class="flex-1 bg-black border border-white/20 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#ff0000]">
+      </div>
+      <button class="w-full bg-[#ff0000] py-2.5 rounded-xl font-semibold text-sm">Continua · OTP via email</button>
+    </form>
+    <form method="post" action="/verify/dismiss" class="mt-2">
+      <button class="w-full text-xs text-gray-500 py-2">Più tardi</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
 </body>
 </html>

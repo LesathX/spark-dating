@@ -27,7 +27,7 @@
             {% endif %}
         </div>
         <div class="px-5 py-5">
-            <h1 class="font-hot text-3xl tracking-wide">{{ altro.nome }}{% if altro.eta %}, {{ altro.eta }}{% endif %}</h1>
+            <h1 class="font-hot text-3xl tracking-wide">{{ altro.nome }}{% if altro.eta %}, {{ altro.eta }}{% endif %}{% if altro.is_verified or altro.phone_verified %} <span title="Account verificato" class="text-orange-400">🔥</span>{% endif %}</h1>
             {% if altro.citta %}<p class="text-gray-400 text-sm mt-1">📍 {{ altro.citta }}</p>{% endif %}
             {% if altro.bio %}<p class="text-gray-300 text-sm mt-4">{{ altro.bio }}</p>{% endif %}
             <div class="flex gap-2 mt-6 flex-wrap">

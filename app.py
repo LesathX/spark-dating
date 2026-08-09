@@ -551,6 +551,15 @@ async def discover(req: Request):
 
     cur.close()
     c.close()
+    verified = bool(user.get("phone_verified") or user.get("is_verified"))
+    show_verify = (not verified) and not req.session.get("verify_dismissed")
+    verify_step = (req.query_params.get("verify") or "").strip()  # otp | ok
+    if verify_step == "otp":
+        show_verify = True
+    verify_err = (req.query_params.get("verify_err") or "").strip()
+    test_otp = req.session.get("verify_test_otp") if verify_step == "otp" else None
+    pending_phone = req.session.get("verify_pending_phone") or user.get("telefono")
+
     return templates.TemplateResponse("discover.html", {
         "request": req,
         "user": user,
@@ -560,6 +569,11 @@ async def discover(req: Request):
         "has_gps": has_gps,
         "distanza_max": distanza_max,
         "only_online": only_online,
+        "show_verify": show_verify,
+        "verify_step": verify_step,
+        "verify_err": verify_err,
+        "test_otp": test_otp,
+        "pending_phone": pending_phone,
     })
 
 @app.post("/swipe")
@@ -2581,6 +2595,7 @@ async def admin_panel(req: Request):
         cur0.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMP")
         cur0.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified INTEGER DEFAULT 0")
         cur0.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMP")
+        cur0.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified INTEGER DEFAULT 0")
         c0.commit()
         cur0.close()
         c0.close()

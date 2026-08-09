@@ -193,13 +193,20 @@
     </script>
 
 {% if show_verify %}
-<div id="verify-modal" class="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-4">
-  <div class="w-full max-w-sm bg-[#111] border border-white/15 rounded-2xl p-5 shadow-[0_0_40px_rgba(255,0,0,0.2)]">
+<script>document.documentElement.style.overflow='hidden';document.body.style.overflow='hidden';</script>
+
+<div id="verify-modal" class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/85 p-4"
+     style="pointer-events:auto;"
+     onclick="event.stopPropagation();">
+  <div class="w-full max-w-sm bg-[#111] border border-white/15 rounded-2xl p-5 shadow-[0_0_40px_rgba(255,0,0,0.25)]"
+       onclick="event.stopPropagation();">
     <div class="flex items-start justify-between gap-2 mb-2">
       <h2 class="font-hot text-2xl tracking-wide text-[#ff0000]">VERIFICA ACCOUNT</h2>
-      <form method="post" action="/verify/dismiss">
-        <button type="submit" class="text-gray-500 text-xl leading-none">✕</button>
+      {% if verify_step != 'otp' %}
+      <form method="post" action="/verify/dismiss" onsubmit="return confirm('Potrai verificare più tardi dal profilo. Chiudere ora?');">
+        <button type="submit" class="text-gray-500 text-xl leading-none px-2">✕</button>
       </form>
+      {% endif %}
     </div>
 
     {% if verify_err == 'numero' %}
@@ -256,13 +263,14 @@
           <option value="+49">+49</option>
           <option value="+34">+34</option>
         </select>
-        <input name="phone" type="tel" required placeholder="333 1234567"
+        <input name="phone" type="tel" required placeholder="333 1234567" autocomplete="tel"
+               autofocus
                class="flex-1 bg-black border border-white/20 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#ff0000]">
       </div>
       <button class="w-full bg-[#ff0000] py-2.5 rounded-xl font-semibold text-sm">Continua · OTP via email</button>
     </form>
-    <form method="post" action="/verify/dismiss" class="mt-2">
-      <button class="w-full text-xs text-gray-500 py-2">Più tardi</button>
+    <form method="post" action="/verify/dismiss" class="mt-2" onsubmit="return confirm('Potrai completare la verifica più tardi. Continuare senza verificare?');">
+      <button type="submit" class="w-full text-xs text-gray-500 py-2">Più tardi</button>
     </form>
     {% endif %}
   </div>

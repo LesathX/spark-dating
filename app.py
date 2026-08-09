@@ -552,13 +552,21 @@ async def discover(req: Request):
     cur.close()
     c.close()
     verified = bool(user.get("phone_verified") or user.get("is_verified"))
-    show_verify = (not verified) and not req.session.get("verify_dismissed")
-    verify_step = (req.query_params.get("verify") or "").strip()  # otp | ok
-    if verify_step == "otp":
-        show_verify = True
+    verify_step = (req.query_params.get("verify") or "").strip()  # otp | ok | ""
     verify_err = (req.query_params.get("verify_err") or "").strip()
-    test_otp = req.session.get("verify_test_otp") if verify_step == "otp" else None
     pending_phone = req.session.get("verify_pending_phone") or user.get("telefono")
+    # se c'è OTP in corso, resta sullo step otp anche dopo refresh
+    if req.session.get("verify_pending_phone") and verify_step != "ok":
+        verify_step = "otp"
+    test_otp = req.session.get("verify_test_otp") if verify_step == "otp" else None
+    # mostra popup se non verificato e non ha scelto "più tardi"
+    # non si chiude da solo: solo /verify/dismiss
+    show_verify = False
+    if not verified:
+        if verify_step in ("otp", "ok") or req.session.get("verify_pending_phone"):
+            show_verify = True
+        elif not req.session.get("verify_dismissed"):
+            show_verify = True
 
     return templates.TemplateResponse("discover.html", {
         "request": req,
@@ -2369,6 +2377,7 @@ async def verify_confirm(req: Request, otp: str = Form(...)):
     try:
         req.session.pop("verify_pending_phone", None)
         req.session.pop("verify_test_otp", None)
+        req.session.pop("verify_dismissed", None)
     except Exception:
         pass
     return RedirectResponse("/discover?verify=ok", 303)

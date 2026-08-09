@@ -963,7 +963,7 @@ async def chat_page(req: Request, conversation_id: int):
 
 
 @app.post("/chat/{conversation_id}/send")
-async def send_message(req: Request, conversation_id: int, contenuto: str = Form(...)):
+async def send_message(req: Request, conversation_id: int, contenuto: str = Form(""), ttl_seconds: int = Form(0)):
     user = current_user(req)
     if not user:
         return RedirectResponse("/login", 303)
@@ -972,6 +972,9 @@ async def send_message(req: Request, conversation_id: int, contenuto: str = Form
     r = get_restrictions(user["id"])
     if r.get("no_messaggi") or r.get("no_chat"):
         return RedirectResponse(f"/chat/{conversation_id}?err=no_msg", 303)
+    contenuto = (contenuto or "").strip()
+    if not contenuto:
+        return RedirectResponse(f"/chat/{conversation_id}", 303)
     c = db()
     cur = c.cursor()
     cur.execute("""SELECT c.id, m.user1_id, m.user2_id FROM conversations c
@@ -981,8 +984,34 @@ async def send_message(req: Request, conversation_id: int, contenuto: str = Form
         cur.close()
         c.close()
         return RedirectResponse("/chats", 303)
-    cur.execute("INSERT INTO messages (conversation_id,sender_id,tipo,contenuto) VALUES (%s,%s,'testo',%s)", (conversation_id, user["id"], contenuto))
-    cur.execute("UPDATE conversations SET ultimo_messaggio_at=CURRENT_TIMESTAMP WHERE id=%s", (conversation_id,))
+    expires_sql = None
+    try:
+        ttl = int(ttl_seconds or 0)
+    except Exception:
+        ttl = 0
+    if ttl > 0:
+        try:
+            cur.execute(
+                """INSERT INTO messages (conversation_id,sender_id,tipo,contenuto,expires_at)
+                   VALUES (%s,%s,'testo',%s, NOW() + (%s || ' seconds')::interval)""",
+                (conversation_id, user["id"], contenuto, str(ttl)),
+            )
+        except Exception as e:
+            print("insert ttl msg:", e)
+            c.rollback()
+            cur.execute(
+                "INSERT INTO messages (conversation_id,sender_id,tipo,contenuto) VALUES (%s,%s,'testo',%s)",
+                (conversation_id, user["id"], contenuto),
+            )
+    else:
+        cur.execute(
+            "INSERT INTO messages (conversation_id,sender_id,tipo,contenuto) VALUES (%s,%s,'testo',%s)",
+            (conversation_id, user["id"], contenuto),
+        )
+    try:
+        cur.execute("UPDATE conversations SET ultimo_messaggio_at=CURRENT_TIMESTAMP WHERE id=%s", (conversation_id,))
+    except Exception:
+        pass
     altro_id = conv["user2_id"] if user["id"] == conv["user1_id"] else conv["user1_id"]
     try:
         cur.execute(
@@ -994,8 +1023,219 @@ async def send_message(req: Request, conversation_id: int, contenuto: str = Form
     c.commit()
     cur.close()
     c.close()
-    await manager.send(altro_id, {"type": "nuovo_messaggio", "title": "Nuovo messaggio", "message": contenuto[:80], "conversation_id": conversation_id})
+    try:
+        await manager.send(altro_id, {"type": "nuovo_messaggio", "title": "Nuovo messaggio", "message": contenuto[:80], "conversation_id": conversation_id})
+    except Exception:
+        pass
     return RedirectResponse(f"/chat/{conversation_id}", 303)
+
+
+@app.post("/chat/{conversation_id}/send-media")
+async def send_media(req: Request, conversation_id: int):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    if is_suspended(user):
+        return RedirectResponse("/profile?err=sospeso", 303)
+    r = get_restrictions(user["id"])
+    if r.get("no_messaggi") or r.get("no_chat"):
+        return RedirectResponse(f"/chat/{conversation_id}?err=no_msg", 303)
+    form = await req.form()
+    file = form.get("file")
+    try:
+        ttl = int(form.get("ttl_seconds") or 0)
+    except Exception:
+        ttl = 0
+    kind = (form.get("media_kind") or "image").strip()
+    caption = (form.get("contenuto") or "").strip()
+    if not file or not getattr(file, "filename", None):
+        return RedirectResponse(f"/chat/{conversation_id}", 303)
+
+    c = db()
+    cur = c.cursor()
+    cur.execute("""SELECT c.id, m.user1_id, m.user2_id FROM conversations c
+           JOIN matches m ON m.id = c.match_id WHERE c.id=%s""", (conversation_id,))
+    conv = cur.fetchone()
+    if not conv or user["id"] not in (conv["user1_id"], conv["user2_id"]):
+        cur.close()
+        c.close()
+        return RedirectResponse("/chats", 303)
+
+    # upload
+    url = None
+    try:
+        data = await file.read()
+        fname = file.filename or "media.bin"
+        import uuid, os
+        ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else "bin"
+        content_type = getattr(file, "content_type", None) or "application/octet-stream"
+        if kind == "image" or content_type.startswith("image/"):
+            content_type = content_type if content_type.startswith("image/") else "image/jpeg"
+        elif kind == "video":
+            content_type = content_type if content_type.startswith("video/") else "video/mp4"
+        elif kind == "audio":
+            content_type = content_type if content_type.startswith("audio/") else "audio/webm"
+        storage_path = f"chat/{user['id']}/{uuid.uuid4().hex}.{ext}"
+        try:
+            if storage_enabled():
+                url = await storage_upload(storage_path, data, content_type)
+            else:
+                raise RuntimeError("storage off")
+        except Exception as e:
+            print("chat media storage:", e)
+            os.makedirs("static/uploads/chat", exist_ok=True)
+            path = f"static/uploads/chat/{uuid.uuid4().hex}.{ext}"
+            with open(path, "wb") as f:
+                f.write(data)
+            url = "/" + path
+    except Exception as e:
+        print("chat media read:", e)
+        cur.close()
+        c.close()
+        return RedirectResponse(f"/chat/{conversation_id}?err=media", 303)
+
+    if not url:
+        cur.close()
+        c.close()
+        return RedirectResponse(f"/chat/{conversation_id}?err=media", 303)
+
+    media_type = kind if kind in ("image", "video", "audio") else "image"
+    try:
+        if ttl > 0:
+            cur.execute(
+                """INSERT INTO messages (conversation_id,sender_id,tipo,contenuto,media_url,media_type,expires_at)
+                   VALUES (%s,%s,%s,%s,%s,%s, NOW() + (%s || ' seconds')::interval)""",
+                (conversation_id, user["id"], media_type, caption or None, url, media_type, str(ttl)),
+            )
+        else:
+            cur.execute(
+                """INSERT INTO messages (conversation_id,sender_id,tipo,contenuto,media_url,media_type)
+                   VALUES (%s,%s,%s,%s,%s,%s)""",
+                (conversation_id, user["id"], media_type, caption or None, url, media_type),
+            )
+    except Exception as e:
+        print("insert media msg:", e)
+        c.rollback()
+        try:
+            cur.execute(
+                "INSERT INTO messages (conversation_id,sender_id,tipo,contenuto) VALUES (%s,%s,%s,%s)",
+                (conversation_id, user["id"], media_type, (caption or url)[:500]),
+            )
+        except Exception as e2:
+            print("insert media fallback:", e2)
+            c.rollback()
+            cur.close()
+            c.close()
+            return RedirectResponse(f"/chat/{conversation_id}?err=media", 303)
+
+    try:
+        cur.execute("UPDATE conversations SET ultimo_messaggio_at=CURRENT_TIMESTAMP WHERE id=%s", (conversation_id,))
+    except Exception:
+        pass
+    altro_id = conv["user2_id"] if user["id"] == conv["user1_id"] else conv["user1_id"]
+    try:
+        cur.execute(
+            "INSERT INTO notifications (user_id,tipo,titolo,contenuto,related_id) VALUES (%s,'nuovo_messaggio',%s,%s,%s)",
+            (altro_id, f"Media da {user.get('nome') or 'utente'}", media_type, conversation_id),
+        )
+    except Exception:
+        pass
+    c.commit()
+    cur.close()
+    c.close()
+    try:
+        await manager.send(altro_id, {"type": "nuovo_messaggio", "title": "Nuovo media", "message": media_type, "conversation_id": conversation_id})
+    except Exception:
+        pass
+    return RedirectResponse(f"/chat/{conversation_id}", 303)
+
+
+@app.post("/chat/{conversation_id}/block")
+async def chat_block(req: Request, conversation_id: int):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute("""SELECT m.user1_id, m.user2_id FROM conversations c
+               JOIN matches m ON m.id = c.match_id WHERE c.id=%s""", (conversation_id,))
+        conv = cur.fetchone()
+        if not conv or user["id"] not in (conv["user1_id"], conv["user2_id"]):
+            cur.close()
+            c.close()
+            return RedirectResponse("/chats", 303)
+        altro_id = conv["user2_id"] if user["id"] == conv["user1_id"] else conv["user1_id"]
+        try:
+            cur.execute(
+                "INSERT INTO blocks (blocker_id, blocked_id) VALUES (%s,%s) ON CONFLICT DO NOTHING",
+                (user["id"], altro_id),
+            )
+        except Exception:
+            c.rollback()
+            try:
+                cur.execute(
+                    "INSERT INTO blocks (blocker_id, blocked_id) VALUES (%s,%s)",
+                    (user["id"], altro_id),
+                )
+            except Exception as e:
+                print("block:", e)
+                c.rollback()
+        # disattiva match
+        try:
+            u1, u2 = sorted([user["id"], altro_id])
+            cur.execute("UPDATE matches SET attivo=0 WHERE user1_id=%s AND user2_id=%s", (u1, u2))
+        except Exception:
+            pass
+        c.commit()
+    finally:
+        cur.close()
+        c.close()
+    return RedirectResponse("/chats?blocked=1", 303)
+
+
+@app.post("/chat/{conversation_id}/report")
+async def chat_report(req: Request, conversation_id: int, motivo: str = Form("segnalazione")):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute("""SELECT m.user1_id, m.user2_id FROM conversations c
+               JOIN matches m ON m.id = c.match_id WHERE c.id=%s""", (conversation_id,))
+        conv = cur.fetchone()
+        if not conv or user["id"] not in (conv["user1_id"], conv["user2_id"]):
+            cur.close()
+            c.close()
+            return RedirectResponse("/chats", 303)
+        altro_id = conv["user2_id"] if user["id"] == conv["user1_id"] else conv["user1_id"]
+        try:
+            cur.execute(
+                """INSERT INTO reports (reporter_id, reported_id, motivo, conversation_id)
+                   VALUES (%s,%s,%s,%s)""",
+                (user["id"], altro_id, (motivo or "segnalazione")[:200], conversation_id),
+            )
+        except Exception as e:
+            print("report table?:", e)
+            c.rollback()
+            # fallback notification to all admins
+            try:
+                cur.execute("SELECT id FROM users WHERE COALESCE(is_admin,0)=1")
+                for a in cur.fetchall():
+                    cur.execute(
+                        "INSERT INTO notifications (user_id,tipo,titolo,contenuto,related_id) VALUES (%s,'report',%s,%s,%s)",
+                        (a["id"], "Segnalazione", f"User {user['id']} segnala {altro_id}: {motivo}", altro_id),
+                    )
+            except Exception as e2:
+                print("report notif:", e2)
+                c.rollback()
+        c.commit()
+    finally:
+        cur.close()
+        c.close()
+    return RedirectResponse(f"/chat/{conversation_id}?reported=1", 303)
+
 
 @app.get("/profile", response_class=HTMLResponse)
 async def profile_page(req: Request):

@@ -176,3 +176,25 @@ SELECT * FROM (VALUES
 WHERE NOT EXISTS (SELECT 1 FROM gift_types LIMIT 1);
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_bot INTEGER DEFAULT 0;
+
+-- Chat media + autodistruzione + reports
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_url TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_type VARCHAR(20);
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;
+
+CREATE TABLE IF NOT EXISTS reports (
+    id SERIAL PRIMARY KEY,
+    reporter_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    reported_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    motivo TEXT,
+    conversation_id INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS blocks (
+    id SERIAL PRIMARY KEY,
+    blocker_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    blocked_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(blocker_id, blocked_id)
+);

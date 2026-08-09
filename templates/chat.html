@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Chat – MyCheating</title>
     <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
@@ -10,123 +10,324 @@
         body { background-color: #0a0a0a; font-family: 'Oswald', sans-serif; }
         .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
         .text-red-pure { color: #ff0000; }
+        /* Anti-screenshot / copy deterrents (non assoluti su browser) */
+        .noscreen {
+            -webkit-user-select: none; user-select: none;
+            -webkit-touch-callout: none;
+        }
+        .noscreen img, .noscreen video { pointer-events: auto; -webkit-user-drag: none; }
+        body.blur-on-hide.hidden-tab #chat-main { filter: blur(18px); }
+        @media print { body { display: none !important; } }
+        .msg-burn { animation: pulse 1s ease infinite; border: 1px solid rgba(255,0,0,0.5); }
+        @keyframes pulse { 50% { opacity: 0.7; } }
+        #chat-list { scrollbar-width: thin; scrollbar-color: #333 transparent; }
     </style>
 </head>
-<body class="text-white min-h-screen flex flex-col">
+<body class="text-white min-h-screen flex flex-col noscreen blur-on-hide">
 
-    <div class="flex items-center gap-3 px-4 py-3 border-b border-white/10">
-        <a href="/matches" class="text-gray-400 text-xl">←</a>
-        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-red-700 to-black flex items-center justify-center font-hot">
-            {{ (altro.nome or altro.username or '?')[0] | upper }}
+<div class="flex flex-1 min-h-0 h-[100dvh] max-h-[100dvh]">
+
+  <!-- ===== LISTA CHAT (sinistra) ===== -->
+  <aside id="chat-list" class="hidden md:flex w-72 shrink-0 flex-col border-r border-white/10 bg-[#080808]">
+    <div class="px-4 py-3 border-b border-white/10 font-hot text-xl tracking-wide">CHAT</div>
+    <div class="flex-1 overflow-y-auto">
+      {% for c in chat_list %}
+      <a href="/chat/{{ c.conversation_id }}"
+         class="flex items-center gap-3 px-3 py-3 border-b border-white/5 hover:bg-white/5 {% if c.conversation_id == conversation_id %}bg-[#ff0000]/15 border-l-2 border-l-[#ff0000]{% endif %}">
+        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-red-800 to-black flex items-center justify-center font-hot text-sm shrink-0">
+          {{ (c.nome or '?')[0]|upper }}
         </div>
-        <div>
-            <div class="font-hot text-lg tracking-wide">{{ altro.nome or altro.username }}{% if altro.eta %}, {{ altro.eta }}{% endif %}</div>
-            <div class="text-xs text-gray-500">@{{ altro.username }}</div>
+        <div class="min-w-0 flex-1">
+          <div class="font-semibold text-sm truncate">{{ c.nome }}</div>
+          <div class="text-[10px] text-gray-500 truncate">{{ c.last_message or '…' }}</div>
         </div>
+      </a>
+      {% else %}
+      <p class="p-4 text-gray-500 text-sm">Nessuna altra chat</p>
+      {% endfor %}
+    </div>
+    <!-- Nav app desktop -->
+    <div class="border-t border-white/10 p-2 grid grid-cols-3 gap-1 text-[10px] text-center">
+      <a href="/discover" class="py-2 rounded-lg hover:bg-white/5 text-gray-400">🔥 Scopri</a>
+      <a href="/matches" class="py-2 rounded-lg hover:bg-white/5 text-gray-400">♥ Match</a>
+      <a href="/profile" class="py-2 rounded-lg hover:bg-white/5 text-gray-400">👤 Tu</a>
+      <a href="/likes" class="py-2 rounded-lg hover:bg-white/5 text-gray-400">⭐ Likes</a>
+      <a href="/chats" class="py-2 rounded-lg hover:bg-white/5 text-gray-400">💬 Chat</a>
+      <a href="/notifications" class="py-2 rounded-lg hover:bg-white/5 text-gray-400">🔔 Notif</a>
+    </div>
+  </aside>
+
+  <!-- ===== CHAT PRINCIPALE ===== -->
+  <div id="chat-main" class="flex-1 flex flex-col min-w-0 min-h-0">
+
+    <!-- Header -->
+    <div class="flex items-center gap-2 px-3 py-2.5 border-b border-white/10 shrink-0">
+      <button type="button" id="btn-list-mobile" class="md:hidden text-gray-400 text-xl px-1">☰</button>
+      <a href="/chats" class="text-gray-400 text-xl md:hidden">←</a>
+      <a href="/u/{{ altro.id }}" class="w-10 h-10 rounded-full bg-gradient-to-br from-red-700 to-black flex items-center justify-center font-hot shrink-0">
+        {{ (altro.nome or altro.username or '?')[0] | upper }}
+      </a>
+      <div class="min-w-0 flex-1">
+        <a href="/u/{{ altro.id }}" class="font-hot text-lg tracking-wide truncate block hover:text-[#ff0000]">
+          {{ altro.nome or altro.username }}{% if altro.eta %}, {{ altro.eta }}{% endif %}
+        </a>
+        <div class="text-xs text-gray-500">@{{ altro.username or 'user' }}</div>
+      </div>
+      <button type="button" id="btn-more" class="text-gray-400 px-2 text-xl">⋮</button>
     </div>
 
-    
-    <!-- Gallery privata: richiesta / consenso -->
-    <div class="px-4 py-2 border-b border-white/5 bg-black/40">
-        {% if pending_request %}
-        <div class="bg-[#ff0000]/15 border border-[#ff0000]/40 rounded-xl p-3 text-sm">
-            <p class="mb-2">📷 <strong>{{ altro.nome }}</strong> ha chiesto di vedere la gallery private
-            (ha già pagato {{ pending_request.credits_paid }} crediti, <span class="text-red-pure">non rimborsabili</span>).</p>
-            <div class="flex gap-2">
-            <form method="post" action="/gallery/decide/{{ pending_request.id }}" class="flex-1">
-                    <input type="hidden" name="conversation_id" value="{{ conversation_id }}">
-                    <input type="hidden" name="decision" value="approved">
-                    <button class="w-full py-2 rounded-lg bg-green-600 text-white text-sm font-semibold">Accetta</button>
-                </form>
-                <form method="post" action="/gallery/decide/{{ pending_request.id }}" class="flex-1">
-                    <input type="hidden" name="conversation_id" value="{{ conversation_id }}">
-                    <input type="hidden" name="decision" value="denied">
-                    <button class="w-full py-2 rounded-lg bg-white/10 text-gray-300 text-sm">Rifiuta</button>
-                </form>
-            </div>
-        </div>
-        {% elif photo_access == 'approved' %}
-        <div class="flex items-center justify-between gap-2 text-sm">
-            <span class="text-green-400">✅ Puoi vedere le gallery privata</span>
-            <a href="/gallery/view/{{ altro.id }}" class="text-[#ff0000] font-semibold">Apri gallery →</a>
-        </div>
-        {% elif photo_access == 'pending' %}
-        <p class="text-sm text-yellow-400/90">⏳ Richiesta gallery privata in attesa di risposta…</p>
-        {% elif photo_access == 'denied' %}
-        <div class="flex items-center justify-between gap-2 text-sm">
-            <span class="text-gray-500">Richiesta rifiutata (crediti non rimborsati)</span>
-            <form method="post" action="/gallery/request-access/{{ altro.id }}">
-                <input type="hidden" name="conversation_id" value="{{ conversation_id }}">
-                <button class="text-[#ff0000] text-xs">Richiesta di nuovo ({{ photo_cost }} cr.)</button>
-            </form>
-        </div>
-        {% else %}
-        <form method="post" action="/gallery/request-access/{{ altro.id }}" class="flex items-center justify-between gap-2"
-              onsubmit="return confirm('Pagherai {{ photo_cost }} crediti NON RIMBORSABILI, anche se rifiuta. Continuare?')">
-            <input type="hidden" name="conversation_id" value="{{ conversation_id }}">
-            <span class="text-xs text-gray-400">Gallery privata di {{ altro.nome }}</span>
-            <button class="bg-[#ff0000]/20 border border-[#ff0000]/40 text-[#ff0000] text-xs px-3 py-1.5 rounded-lg font-semibold">
-                Richiedi ({{ photo_cost }} crediti)
-            </button>
+    <!-- Menu azioni -->
+    <div id="more-menu" class="hidden absolute right-3 top-14 z-30 bg-[#111] border border-white/15 rounded-xl shadow-xl overflow-hidden text-sm w-48">
+      <a href="/u/{{ altro.id }}" class="block px-4 py-3 hover:bg-white/5 border-b border-white/5">👤 Profilo</a>
+      <a href="/gifts/send/{{ altro.id }}?conversation_id={{ conversation_id }}" class="block px-4 py-3 hover:bg-white/5 border-b border-white/5">🎁 Invia dono</a>
+      <form method="post" action="/chat/{{ conversation_id }}/block" onsubmit="return confirm('Bloccare {{ altro.nome }}?')">
+        <button class="w-full text-left px-4 py-3 hover:bg-white/5 border-b border-white/5 text-red-400">🚫 Blocca</button>
+      </form>
+      <form method="post" action="/chat/{{ conversation_id }}/report">
+        <input type="hidden" name="motivo" value="segnalazione_utente">
+        <button class="w-full text-left px-4 py-3 hover:bg-white/5 text-yellow-400">⚠️ Segnala</button>
+      </form>
+    </div>
+
+    <!-- Gallery privata (compatta) -->
+    {% if pending_request or photo_access %}
+    <div class="px-3 py-1.5 border-b border-white/5 bg-black/40 text-xs shrink-0">
+      {% if pending_request %}
+      <div class="flex gap-2 items-center flex-wrap">
+        <span>📷 Richiesta gallery da {{ altro.nome }}</span>
+        <form method="post" action="/gallery/decide/{{ pending_request.id }}" class="inline">
+          <input type="hidden" name="conversation_id" value="{{ conversation_id }}">
+          <input type="hidden" name="decision" value="approved">
+          <button class="px-2 py-0.5 rounded bg-green-600 text-white">OK</button>
         </form>
-        {% endif %}
+        <form method="post" action="/gallery/decide/{{ pending_request.id }}" class="inline">
+          <input type="hidden" name="conversation_id" value="{{ conversation_id }}">
+          <input type="hidden" name="decision" value="denied">
+          <button class="px-2 py-0.5 rounded bg-white/10">No</button>
+        </form>
+      </div>
+      {% elif photo_access == 'approved' %}
+      <a href="/gallery/view/{{ altro.id }}" class="text-[#ff0000]">✅ Gallery privata →</a>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Messaggi -->
+    <div class="flex-1 overflow-y-auto px-3 py-3 space-y-2" id="messages">
+      {% for msg in messaggi %}
+      <div class="flex {% if msg.sender_id == user.id %}justify-end{% else %}justify-start{% endif %} msg-row"
+           data-expires="{{ msg.expires_at or '' }}" data-msg-id="{{ msg.id }}">
+        <div class="max-w-[80%] px-3 py-2 rounded-2xl text-sm {% if msg.expires_at %}msg-burn{% endif %}
+            {% if msg.sender_id == user.id %}bg-[#ff0000] text-white rounded-br-md{% else %}bg-white/10 rounded-bl-md{% endif %}">
+          {% if msg.media_url %}
+            {% if msg.media_type == 'video' or (msg.media_url and ('.mp4' in msg.media_url|string or '.webm' in msg.media_url|string)) %}
+            <video src="{{ msg.media_url }}" class="rounded-lg max-w-full max-h-48 mb-1" controls playsinline></video>
+            {% elif msg.media_type == 'audio' or (msg.media_url and ('.webm' in msg.media_url|string or '.mp3' in msg.media_url|string or '.ogg' in msg.media_url|string or '.m4a' in msg.media_url|string)) %}
+            <audio src="{{ msg.media_url }}" controls class="w-full max-w-xs mb-1"></audio>
+            {% else %}
+            <img src="{{ msg.media_url }}" class="rounded-lg max-w-full max-h-48 mb-1" alt="" draggable="false">
+            {% endif %}
+          {% endif %}
+          {% if msg.contenuto %}<div>{{ msg.contenuto }}</div>{% endif %}
+          <div class="text-[10px] mt-1 opacity-60 text-right flex items-center justify-end gap-1">
+            {% if msg.expires_at %}<span class="text-yellow-300">⏱ autodistr.</span>{% endif %}
+            <span>{{ msg.ora or '' }}</span>
+          </div>
+        </div>
+      </div>
+      {% else %}
+      <div class="text-center text-gray-500 py-12">
+        <div class="text-3xl mb-2">👋</div>
+        Inizia la conversazione con {{ altro.nome }}
+      </div>
+      {% endfor %}
     </div>
 
-    <div class="flex-1 overflow-y-auto px-4 py-4 space-y-3" id="messages">
-        {% for msg in messaggi %}
-        <div class="flex {% if msg.sender_id == user.id %}justify-end{% else %}justify-start{% endif %}">
-            <div class="max-w-[75%] px-4 py-2.5 rounded-2xl text-sm
-                {% if msg.sender_id == user.id %}
-                    bg-[#ff0000] text-white rounded-br-md
-                {% else %}
-                    bg-white/10 text-white rounded-bl-md
-                {% endif %}">
-                {{ msg.contenuto }}
-                <div class="text-[10px] mt-1 opacity-60 text-right">
-                    {% if msg.ora %}{{ msg.ora }}{% elif msg.data_invio %}{{ msg.data_invio }}{% endif %}
-                </div>
-            </div>
-        </div>
-        {% else %}
-        <div class="text-center text-gray-500 py-16">
-            <div class="text-3xl mb-2">👋</div>
-            Inizia la conversazione con {{ altro.nome }}
-        </div>
-        {% endfor %}
+    <!-- Toolbar azioni -->
+    <div class="px-2 pt-2 border-t border-white/10 flex flex-wrap gap-1.5 items-center shrink-0">
+      <a href="/gifts/send/{{ altro.id }}?conversation_id={{ conversation_id }}" class="bg-[#ff0000]/20 border border-[#ff0000]/40 text-[#ff0000] text-xs px-2.5 py-1.5 rounded-xl font-semibold">🎁</a>
+      <form method="post" action="/chat/{{ conversation_id }}/block" class="inline" onsubmit="return confirm('Bloccare?')">
+        <button type="submit" class="bg-white/5 border border-white/15 text-xs px-2.5 py-1.5 rounded-xl text-red-400">🚫</button>
+      </form>
+      <form method="post" action="/chat/{{ conversation_id }}/report" class="inline">
+        <input type="hidden" name="motivo" value="segnalazione">
+        <button type="submit" class="bg-white/5 border border-white/15 text-xs px-2.5 py-1.5 rounded-xl text-yellow-400">⚠️</button>
+      </form>
+      <label class="bg-white/5 border border-white/15 text-xs px-2.5 py-1.5 rounded-xl cursor-pointer">
+        📷<input type="file" id="file-photo" accept="image/*" class="hidden">
+      </label>
+      <label class="bg-white/5 border border-white/15 text-xs px-2.5 py-1.5 rounded-xl cursor-pointer">
+        🎬<input type="file" id="file-video" accept="video/*" class="hidden">
+      </label>
+      <button type="button" id="btn-audio" class="bg-white/5 border border-white/15 text-xs px-2.5 py-1.5 rounded-xl">🎤</button>
+      <select id="ttl" class="bg-black border border-white/15 text-[10px] rounded-lg px-2 py-1.5 text-gray-300 max-w-[110px]">
+        <option value="0">No autodistr.</option>
+        <option value="30">⏱ 30 sec</option>
+        <option value="60">⏱ 1 min</option>
+        <option value="300">⏱ 5 min</option>
+        <option value="3600">⏱ 1 ora</option>
+        <option value="86400">⏱ 24 ore</option>
+      </select>
+      <span id="audio-status" class="text-[10px] text-red-400 hidden">REC…</span>
     </div>
 
-    <div class="px-4 pt-2 border-t border-white/10 flex gap-2">
-        <a href="/gifts/send/{{ altro.id }}" class="shrink-0 self-center bg-[#ff0000]/20 border border-[#ff0000]/40 text-[#ff0000] text-xs px-3 py-2 rounded-xl font-semibold">🎁 Dono</a>
-    </div>
-    <form method="post" action="/chat/{{ conversation_id }}/send" class="px-4 pb-4 pt-2 flex gap-2">
-        <input type="text" name="contenuto" required placeholder="Scrivi un messaggio..."
-               class="flex-1 bg-white/5 border border-white/15 text-white placeholder-gray-500 rounded-full px-5 py-3 text-sm outline-none focus:border-[#ff0000]"
-               autocomplete="off">
-        <button type="submit" class="w-12 h-12 rounded-full bg-[#ff0000] text-white flex items-center justify-center shrink-0">➤</button>
+    <!-- Input testo -->
+    <form method="post" action="/chat/{{ conversation_id }}/send" class="px-3 pb-3 pt-2 flex gap-2 shrink-0" id="form-text">
+      <input type="hidden" name="ttl_seconds" id="ttl-hidden" value="0">
+      <input type="text" name="contenuto" id="input-text" placeholder="Scrivi un messaggio…"
+             class="flex-1 bg-white/5 border border-white/15 text-white placeholder-gray-500 rounded-full px-4 py-2.5 text-sm outline-none focus:border-[#ff0000]"
+             autocomplete="off">
+      <button type="submit" class="w-11 h-11 rounded-full bg-[#ff0000] text-white flex items-center justify-center shrink-0">➤</button>
     </form>
 
-    <script>
-        const messages = document.getElementById('messages');
-        if (messages) messages.scrollTop = messages.scrollHeight;
-        (function() {
-            const userId = {{ user.id if user else 'null' }};
-            if (!userId) return;
-            let ws;
-            function connect() {
-                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                ws = new WebSocket(`${protocol}//${window.location.host}/ws/${userId}`);
-                ws.onmessage = function(event) {
-                    const data = JSON.parse(event.data);
-                    const toast = document.createElement('div');
-                    toast.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#ff0000;color:white;padding:14px 24px;border-radius:12px;z-index:9999;text-align:center;max-width:90%;font-family:Oswald,sans-serif;';
-                    toast.innerHTML = `<strong>${data.title || 'Notifica'}</strong><br><span style="font-size:13px">${data.message || ''}</span>`;
-                    document.body.appendChild(toast);
-                    setTimeout(() => { toast.style.opacity='0'; setTimeout(() => toast.remove(), 400); }, 4000);
-                };
-                ws.onclose = function() { setTimeout(connect, 3000); };
-            }
-            connect();
-        })();
-    </script>
+    <!-- Form media nascosto -->
+    <form method="post" action="/chat/{{ conversation_id }}/send-media" enctype="multipart/form-data" id="form-media" class="hidden">
+      <input type="file" name="file" id="media-file">
+      <input type="hidden" name="ttl_seconds" id="ttl-media" value="0">
+      <input type="hidden" name="media_kind" id="media-kind" value="image">
+      <input type="text" name="contenuto" value="">
+    </form>
+  </div>
+</div>
+
+<!-- Lista chat mobile overlay -->
+<div id="mobile-list" class="hidden fixed inset-0 z-40 bg-black/80 md:hidden">
+  <div class="w-4/5 max-w-xs h-full bg-[#080808] border-r border-white/10 flex flex-col">
+    <div class="px-4 py-3 border-b border-white/10 flex justify-between items-center">
+      <span class="font-hot text-xl">CHAT</span>
+      <button type="button" id="close-list" class="text-gray-400 text-xl">✕</button>
+    </div>
+    <div class="flex-1 overflow-y-auto">
+      {% for c in chat_list %}
+      <a href="/chat/{{ c.conversation_id }}" class="flex items-center gap-3 px-3 py-3 border-b border-white/5">
+        <div class="w-10 h-10 rounded-full bg-red-900/50 flex items-center justify-center font-hot">{{ (c.nome or '?')[0]|upper }}</div>
+        <div class="min-w-0"><div class="font-semibold text-sm truncate">{{ c.nome }}</div>
+        <div class="text-[10px] text-gray-500 truncate">{{ c.last_message or '' }}</div></div>
+      </a>
+      {% endfor %}
+    </div>
+    <div class="border-t border-white/10 p-2 grid grid-cols-3 gap-1 text-[10px] text-center">
+      <a href="/discover" class="py-2 text-gray-400">🔥 Scopri</a>
+      <a href="/matches" class="py-2 text-gray-400">♥ Match</a>
+      <a href="/profile" class="py-2 text-gray-400">👤 Tu</a>
+      <a href="/likes" class="py-2 text-gray-400">⭐ Likes</a>
+      <a href="/chats" class="py-2 text-gray-400">💬 Lista</a>
+      <a href="/notifications" class="py-2 text-gray-400">🔔</a>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  // Anti-screenshot deterrents
+  document.addEventListener('contextmenu', e => e.preventDefault());
+  document.addEventListener('keyup', e => {
+    if (e.key === 'PrintScreen') {
+      navigator.clipboard && navigator.clipboard.writeText('');
+    }
+  });
+  document.addEventListener('visibilitychange', () => {
+    document.body.classList.toggle('hidden-tab', document.hidden);
+  });
+  // Blur quando perde focus (tenta di coprire switch app)
+  window.addEventListener('blur', () => document.getElementById('chat-main')?.classList.add('opacity-20'));
+  window.addEventListener('focus', () => document.getElementById('chat-main')?.classList.remove('opacity-20'));
+
+  const messages = document.getElementById('messages');
+  if (messages) messages.scrollTop = messages.scrollHeight;
+
+  // menu
+  const more = document.getElementById('btn-more');
+  const menu = document.getElementById('more-menu');
+  more?.addEventListener('click', () => menu.classList.toggle('hidden'));
+  document.addEventListener('click', e => {
+    if (!menu.contains(e.target) && e.target !== more) menu.classList.add('hidden');
+  });
+
+  // mobile list
+  document.getElementById('btn-list-mobile')?.addEventListener('click', () => {
+    document.getElementById('mobile-list').classList.remove('hidden');
+  });
+  document.getElementById('close-list')?.addEventListener('click', () => {
+    document.getElementById('mobile-list').classList.add('hidden');
+  });
+
+  // TTL sync
+  const ttl = document.getElementById('ttl');
+  function syncTtl() {
+    const v = ttl?.value || '0';
+    document.getElementById('ttl-hidden').value = v;
+    document.getElementById('ttl-media').value = v;
+  }
+  ttl?.addEventListener('change', syncTtl);
+  syncTtl();
+
+  // Media files
+  function sendFile(input, kind) {
+    if (!input.files || !input.files[0]) return;
+    syncTtl();
+    document.getElementById('media-kind').value = kind;
+    const mf = document.getElementById('media-file');
+    const dt = new DataTransfer();
+    dt.items.add(input.files[0]);
+    mf.files = dt.files;
+    document.getElementById('form-media').submit();
+  }
+  document.getElementById('file-photo')?.addEventListener('change', e => sendFile(e.target, 'image'));
+  document.getElementById('file-video')?.addEventListener('change', e => sendFile(e.target, 'video'));
+
+  // Audio record
+  let rec = null, chunks = [], recording = false;
+  document.getElementById('btn-audio')?.addEventListener('click', async () => {
+    const st = document.getElementById('audio-status');
+    if (!recording) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        rec = new MediaRecorder(stream);
+        chunks = [];
+        rec.ondataavailable = e => chunks.push(e.data);
+        rec.onstop = () => {
+          const blob = new Blob(chunks, { type: 'audio/webm' });
+          const file = new File([blob], 'nota_audio.webm', { type: 'audio/webm' });
+          syncTtl();
+          document.getElementById('media-kind').value = 'audio';
+          const mf = document.getElementById('media-file');
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          mf.files = dt.files;
+          document.getElementById('form-media').submit();
+        };
+        rec.start();
+        recording = true;
+        st.classList.remove('hidden');
+        document.getElementById('btn-audio').textContent = '⏹';
+      } catch (err) {
+        alert('Microfono non disponibile');
+      }
+    } else {
+      rec.stop();
+      recording = false;
+      st.classList.add('hidden');
+      document.getElementById('btn-audio').textContent = '🎤';
+    }
+  });
+
+  // Auto-destroy client timer (UI hide when expired)
+  function checkExpire() {
+    const now = Date.now();
+    document.querySelectorAll('.msg-row[data-expires]').forEach(el => {
+      const exp = el.getAttribute('data-expires');
+      if (!exp) return;
+      const t = Date.parse(exp);
+      if (!isNaN(t) && t < now) {
+        el.innerHTML = '<div class="text-xs text-gray-600 italic px-2">Messaggio autodistrutto</div>';
+        el.removeAttribute('data-expires');
+      }
+    });
+  }
+  setInterval(checkExpire, 1000);
+  checkExpire();
+})();
+</script>
 </body>
 </html>

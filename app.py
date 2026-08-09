@@ -2447,10 +2447,14 @@ def send_otp_email(to_email: str, code: str, phone: str = None) -> bool:
     private_key = (os.environ.get("EMAILJS_PRIVATE_KEY") or "").strip()
 
     if service_id and template_id and public_key:
+        if not private_key:
+            _last_smtp_error = "EMAILJS_PRIVATE_KEY mancante (obbligatoria dal server). Su EmailJS: Account → Security → Allow API for non-browser applications"
+            print("[EmailJS]", _last_smtp_error)
         payload = {
             "service_id": service_id,
             "template_id": template_id,
             "user_id": public_key,
+            "accessToken": private_key or "",
             "template_params": {
                 "code": str(code),
                 "to_email": to_email,
@@ -2459,17 +2463,13 @@ def send_otp_email(to_email: str, code: str, phone: str = None) -> bool:
                 "message": f"Codice verifica MyCheating: {code}",
             },
         }
-        if private_key:
-            payload["accessToken"] = private_key
         body = json.dumps(payload).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
         req = Request(
             "https://api.emailjs.com/api/v1.0/email/send",
             data=body,
             method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "Origin": "https://spark-dating-ng10.onrender.com",
-            },
+            headers=headers,
         )
         try:
             with urlopen(req, timeout=25) as resp:

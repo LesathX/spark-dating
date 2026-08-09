@@ -551,19 +551,40 @@ async def discover(req: Request):
 
     cur.close()
     c.close()
-    verified = bool(user.get("phone_verified") or user.get("is_verified"))
-    verify_step = (req.query_params.get("verify") or "").strip()  # otp | ok | ""
+    verified = bool(
+        user.get("phone_verified") in (1, True, "1")
+        or user.get("is_verified") in (1, True, "1")
+    )
+    verify_step = (req.query_params.get("verify") or "").strip()  # otp | ok | open | ""
     verify_err = (req.query_params.get("verify_err") or "").strip()
-    pending_phone = req.session.get("verify_pending_phone") or user.get("telefono")
-    # se c'è OTP in corso, resta sullo step otp anche dopo refresh
-    if req.session.get("verify_pending_phone") and verify_step != "ok":
-        verify_step = "otp"
-    test_otp = req.session.get("verify_test_otp") if verify_step == "otp" else None
-    # mostra popup se non verificato e non ha scelto "più tardi"
-    # non si chiude da solo: solo /verify/dismiss
-    show_verify = False
-    if not verified:
-        if verify_step in ("otp", "ok") or req.session.get("verify_pending_phone"):
+
+    # successo: pulisci sessione e NON mostrare popup
+    if verified or verify_step == "ok":
+        try:
+            req.session.pop("verify_pending_phone", None)
+            req.session.pop("verify_test_otp", None)
+            req.session.pop("verify_dismissed", None)
+        except Exception:
+            pass
+        if verified:
+            verify_step = ""
+        show_verify = False
+        pending_phone = None
+        test_otp = None
+    else:
+        pending_phone = req.session.get("verify_pending_phone") or user.get("telefono")
+        # OTP in corso resta dopo refresh
+        if req.session.get("verify_pending_phone") and verify_step not in ("ok",):
+            verify_step = "otp"
+        if verify_step == "open":
+            try:
+                req.session.pop("verify_dismissed", None)
+            except Exception:
+                pass
+            verify_step = ""
+        test_otp = req.session.get("verify_test_otp") if verify_step == "otp" else None
+        show_verify = False
+        if verify_step == "otp" or req.session.get("verify_pending_phone"):
             show_verify = True
         elif not req.session.get("verify_dismissed"):
             show_verify = True
@@ -2381,6 +2402,21 @@ async def verify_confirm(req: Request, otp: str = Form(...)):
     except Exception:
         pass
     return RedirectResponse("/discover?verify=ok", 303)
+
+
+@app.get("/verify/open")
+async def verify_open(req: Request):
+    """Riapre il popup verifica (dal profilo)."""
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    try:
+        req.session.pop("verify_dismissed", None)
+    except Exception:
+        pass
+    if user.get("phone_verified") or user.get("is_verified"):
+        return RedirectResponse("/profile?already=1", 303)
+    return RedirectResponse("/discover?verify=open", 303)
 
 
 @app.post("/verify/dismiss")

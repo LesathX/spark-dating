@@ -57,6 +57,27 @@
         </div>
         <!-- GPS button -->
         <div class="bg-white/5 border border-white/10 rounded-2xl p-5 mb-6">
+            
+        {% if user.phone_verified or user.is_verified %}
+        <div class="bg-white/5 border border-orange-500/30 rounded-2xl p-4 mb-6 flex items-center gap-3">
+            <span class="text-2xl">🔥</span>
+            <div>
+                <div class="font-semibold text-sm">Account verificato</div>
+                <div class="text-xs text-gray-500">Il tuo numero è privato, solo tu lo vedi</div>
+            </div>
+        </div>
+        {% else %}
+        <a href="/verify/open" class="block bg-white/5 border border-[#ff0000]/40 rounded-2xl p-4 mb-6 hover:border-[#ff0000]">
+            <div class="flex items-center gap-3">
+                <span class="text-2xl">🔥</span>
+                <div>
+                    <div class="font-semibold text-sm text-[#ff0000]">Verifica account 🔥</div>
+                    <div class="text-xs text-gray-500">Numero privato + codice OTP via email · non visibile agli altri</div>
+                </div>
+            </div>
+        </a>
+        {% endif %}
+
             <h2 class="font-hot text-xl tracking-wide mb-2">POSIZIONE</h2>
             <p class="text-gray-500 text-sm mb-4">Attiva il GPS per vedere utenti vicini a te</p>
             <button type="button" id="gps-btn" onclick="requestLocation()" class="w-full bg-[#ff0000] text-white font-semibold py-3.5 rounded-xl tracking-wide">
@@ -190,10 +211,10 @@
     })();
     </script>
 
-{% if not user.phone_verified %}
+{% if not (user.phone_verified or user.is_verified) %}
 <div class="fixed bottom-20 left-4 right-4 z-30 max-w-md mx-auto">
-  <a href="/verify-email" class="block bg-[#ff0000]/90 text-white text-center text-sm py-2.5 rounded-xl shadow-lg">
-    🔥 Verifica account (telefono privato + OTP email)
+  <a href="/verify/open" class="block bg-[#ff0000]/90 text-white text-center text-sm py-2.5 rounded-xl shadow-lg">
+    🔥 Verifica account
   </a>
 </div>
 {% endif %}

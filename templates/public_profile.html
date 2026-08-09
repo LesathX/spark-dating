@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ altro.nome }} – MyCheating</title>
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: #0a0a0a; font-family: 'Oswald', sans-serif; }
+        .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
+        .text-red-pure { color: #ff0000; }
+    </style>
+</head>
+<body class="text-white min-h-screen pb-10">
+    <div class="sticky top-0 z-20 bg-[#0a0a0a]/95 border-b border-white/10 px-4 py-3 flex items-center gap-3">
+        <a href="javascript:history.back()" class="text-gray-400 text-xl">←</a>
+        <div class="font-hot text-xl tracking-wider">{{ altro.nome }}</div>
+        {% if altro.is_online %}<span class="w-2 h-2 bg-green-400 rounded-full"></span>{% endif %}
+    </div>
+    <div class="max-w-md mx-auto">
+        <div class="h-72 bg-gradient-to-br from-red-900 to-black flex items-center justify-center relative">
+            {% if altro.foto_principale_url %}
+            <img src="{{ altro.foto_principale_url }}" class="w-full h-full object-cover" alt="">
+            {% else %}
+            <span class="font-hot text-8xl text-white/30">{{ (altro.nome or '?')[0]|upper }}</span>
+            {% endif %}
+        </div>
+        <div class="px-5 py-5">
+            <h1 class="font-hot text-3xl tracking-wide">{{ altro.nome }}{% if altro.eta %}, {{ altro.eta }}{% endif %}</h1>
+            {% if altro.citta %}<p class="text-gray-400 text-sm mt-1">📍 {{ altro.citta }}</p>{% endif %}
+            {% if altro.bio %}<p class="text-gray-300 text-sm mt-4">{{ altro.bio }}</p>{% endif %}
+            <div class="flex gap-2 mt-6">
+                {% if is_match %}
+                {% if conv_id %}
+                <a href="/chat/{{ conv_id }}" class="flex-1 text-center bg-[#ff0000] py-3 rounded-xl font-semibold">💬 Chat</a>
+                {% else %}
+                <a href="/chat/with/{{ altro.id }}" class="flex-1 text-center bg-[#ff0000] py-3 rounded-xl font-semibold">💬 Chat</a>
+                {% endif %}
+                <a href="/gifts/send/{{ altro.id }}" class="px-5 py-3 rounded-xl bg-white/10 border border-white/15">🎁</a>
+                <a href="/gallery/view/{{ altro.id }}" class="px-5 py-3 rounded-xl bg-white/10 border border-white/15">📷</a>
+                {% else %}
+                <a href="/discover" class="flex-1 text-center bg-[#ff0000] py-3 rounded-xl font-semibold">Torna a Scopri</a>
+                {% endif %}
+            </div>
+            {% if photos %}
+            <h2 class="font-hot text-lg mt-8 mb-3">FOTO</h2>
+            <div class="grid grid-cols-3 gap-2">
+                {% for p in photos %}
+                <div class="aspect-square rounded-xl overflow-hidden bg-black border border-white/10">
+                    {% if p.media_type == 'video' %}
+                    <video src="{{ p.url }}" class="w-full h-full object-cover" muted></video>
+                    {% else %}
+                    <img src="{{ p.url }}" class="w-full h-full object-cover" alt="">
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

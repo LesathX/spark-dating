@@ -1203,27 +1203,47 @@ async def admin_remove_admin(req: Request, user_id: int):
 
 
 
+
 def storage_enabled():
     return bool(SUPABASE_URL and SUPABASE_SERVICE_KEY)
 
 
-async def storage_upload(path: str, data: bytes, content_type: str) -> str:
-    """Carica su Supabase Storage. Prova POST poi PUT. Ritorna URL pubblico."""
-    import httpx
-    url = f"{SUPABASE_URL}/storage/v1/object/{STORAGE_BUCKET}/{path}"
+def _storage_request(method: str, url: str, data: bytes = None, content_type: str = None, json_body: dict = None):
+    """HTTP request senza httpx (urllib standard)."""
+    import json as _json
+    import urllib.request
+    import urllib.error
     headers = {
         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
         "apikey": SUPABASE_SERVICE_KEY,
-        "Content-Type": content_type or "application/octet-stream",
-        "x-upsert": "true",
     }
-    async with httpx.AsyncClient(timeout=300.0) as client:
-        r = await client.post(url, content=data, headers=headers)
-        if r.status_code not in (200, 201):
-            r = await client.put(url, content=data, headers=headers)
-        if r.status_code not in (200, 201):
-            # messaggio chiaro per i log
-            raise RuntimeError(f"Storage {r.status_code}: {r.text[:500]}")
+    body = None
+    if json_body is not None:
+        body = _json.dumps(json_body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    elif data is not None:
+        body = data
+        headers["Content-Type"] = content_type or "application/octet-stream"
+        headers["x-upsert"] = "true"
+    req = urllib.request.Request(url, data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            return resp.status, resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8", errors="replace") if e.fp else ""
+        return e.code, err_body
+    except Exception as e:
+        return 0, str(e)
+
+
+async def storage_upload(path: str, data: bytes, content_type: str) -> str:
+    """Carica su Supabase Storage. Ritorna URL pubblico."""
+    url = f"{SUPABASE_URL}/storage/v1/object/{STORAGE_BUCKET}/{path}"
+    status, body = _storage_request("POST", url, data=data, content_type=content_type)
+    if status not in (200, 201):
+        status, body = _storage_request("PUT", url, data=data, content_type=content_type)
+    if status not in (200, 201):
+        raise RuntimeError(f"Storage {status}: {body[:500]}")
     return f"{SUPABASE_URL}/storage/v1/object/public/{STORAGE_BUCKET}/{path}"
 
 
@@ -1259,27 +1279,21 @@ async def storage_upload_stream(path: str, file_obj, content_type: str, max_byte
 
 
 async def storage_signed_url(path: str, expires_sec: int = 3600) -> str:
-    import httpx
+    import json as _json
     url = f"{SUPABASE_URL}/storage/v1/object/sign/{STORAGE_BUCKET}/{path}"
-    headers = {
-        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-        "apikey": SUPABASE_SERVICE_KEY,
-        "Content-Type": "application/json",
-    }
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        r = await client.post(url, headers=headers, json={"expiresIn": expires_sec})
-        if r.status_code not in (200, 201):
-            raise RuntimeError(f"sign failed: {r.status_code} {r.text[:200]}")
-        data = r.json()
-        signed = data.get("signedURL") or data.get("signedUrl") or ""
-        if signed.startswith("http"):
-            return signed
-        return f"{SUPABASE_URL}/storage/v1{signed}"
+    status, body = _storage_request("POST", url, json_body={"expiresIn": expires_sec})
+    if status not in (200, 201):
+        raise RuntimeError(f"sign failed: {status} {body[:200]}")
+    data = _json.loads(body)
+    signed = data.get("signedURL") or data.get("signedUrl") or ""
+    if signed.startswith("http"):
+        return signed
+    return f"{SUPABASE_URL}/storage/v1{signed}"
 
 
 @app.get("/admin/storage-test")
 async def admin_storage_test(req: Request):
-    """Test rapido Storage (solo admin). Visita /admin/storage-test"""
+    """Test Storage senza httpx. Solo admin."""
     if not require_admin(req):
         return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
     info = {
@@ -1288,34 +1302,24 @@ async def admin_storage_test(req: Request):
         "key_set": bool(SUPABASE_SERVICE_KEY),
         "key_prefix": (SUPABASE_SERVICE_KEY[:12] + "...") if SUPABASE_SERVICE_KEY else None,
         "storage_enabled": storage_enabled(),
+        "transport": "urllib",
     }
     if not storage_enabled():
         return JSONResponse({"ok": False, "info": info, "error": "missing env"})
     try:
-        import httpx
-        # list buckets
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            headers = {
-                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                "apikey": SUPABASE_SERVICE_KEY,
-            }
-            r = await client.get(f"{SUPABASE_URL}/storage/v1/bucket", headers=headers)
-            info["list_buckets_status"] = r.status_code
-            info["list_buckets_body"] = r.text[:500]
-            # try tiny upload
-            test_path = "_test/ping.txt"
-            up = await client.post(
-                f"{SUPABASE_URL}/storage/v1/object/{STORAGE_BUCKET}/{test_path}",
-                content=b"ok",
-                headers={
-                    **headers,
-                    "Content-Type": "text/plain",
-                    "x-upsert": "true",
-                },
-            )
-            info["upload_status"] = up.status_code
-            info["upload_body"] = up.text[:500]
-            info["ok"] = up.status_code in (200, 201)
+        status_b, body_b = _storage_request("GET", f"{SUPABASE_URL}/storage/v1/bucket")
+        info["list_buckets_status"] = status_b
+        info["list_buckets_body"] = body_b[:500]
+        test_path = "_test/ping.txt"
+        status_u, body_u = _storage_request(
+            "POST",
+            f"{SUPABASE_URL}/storage/v1/object/{STORAGE_BUCKET}/{test_path}",
+            data=b"ok",
+            content_type="text/plain",
+        )
+        info["upload_status"] = status_u
+        info["upload_body"] = body_u[:500]
+        info["ok"] = status_u in (200, 201)
         return JSONResponse(info)
     except Exception as e:
         info["exception"] = str(e)

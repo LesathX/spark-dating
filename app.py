@@ -157,25 +157,32 @@ SPELLS = {
     "boost": {"cost": 20, "label": "Boost profilo"},
 }
 
-def spend_credits(user_id, amount, motivo, related_id=None):
-    """Scala crediti e registra transazione. Ritorna True se ok."""
+def spend_credits(user_id, amount, motivo="", related_id=None):
+    """Scala crediti e registra transazione. Ritorna True se ok (sempre bool)."""
     if amount <= 0:
         return True
     c = db()
     cur = c.cursor()
     try:
-        cur.execute("SELECT credits FROM users WHERE id=%s FOR UPDATE", (user_id,))
+        cur.execute("SELECT COALESCE(credits,0) as credits FROM users WHERE id=%s FOR UPDATE", (user_id,))
         row = cur.fetchone()
-        if not row or (row["credits"] or 0) < amount:
+        if not row or row["credits"] < amount:
             c.rollback()
-            cur.close()
-            c.close()
             return False
         cur.execute("UPDATE users SET credits = credits - %s WHERE id=%s", (amount, user_id))
-        cur.execute(
-            "INSERT INTO credit_transactions (user_id, amount, motivo, related_id) VALUES (%s, %s, %s, %s)",
-            (user_id, -amount, motivo, related_id),
-        )
+        try:
+            cur.execute(
+                "INSERT INTO credit_transactions (user_id, amount, motivo, related_id) VALUES (%s,%s,%s,%s)",
+                (user_id, -amount, motivo, related_id),
+            )
+        except Exception:
+            try:
+                cur.execute(
+                    "INSERT INTO credit_transactions (user_id, amount, motivo) VALUES (%s,%s,%s)",
+                    (user_id, -amount, motivo),
+                )
+            except Exception as e2:
+                print("credit_transactions skip:", e2)
         c.commit()
         return True
     except Exception as e:
@@ -183,8 +190,11 @@ def spend_credits(user_id, amount, motivo, related_id=None):
         print("spend_credits error:", e)
         return False
     finally:
-        cur.close()
-        c.close()
+        try:
+            cur.close()
+            c.close()
+        except Exception:
+            pass
 
 def add_credits(user_id, amount, motivo="ricarica"):
     c = db()
@@ -279,33 +289,6 @@ def get_role(user):
         return "mod"
     return "user"
 
-def add_credits(user_id, amount, motivo=""):
-    c = db()
-    cur = c.cursor()
-    cur.execute("UPDATE users SET credits = COALESCE(credits,0) + %s WHERE id=%s RETURNING credits", (amount, user_id))
-    row = cur.fetchone()
-    cur.execute("INSERT INTO credit_transactions (user_id, amount, motivo) VALUES (%s,%s,%s)", (user_id, amount, motivo))
-    c.commit()
-    cur.close()
-    c.close()
-    return row["credits"] if row else None
-
-def spend_credits(user_id, amount, motivo=""):
-    c = db()
-    cur = c.cursor()
-    cur.execute("SELECT COALESCE(credits,0) as credits FROM users WHERE id=%s", (user_id,))
-    row = cur.fetchone()
-    if not row or row["credits"] < amount:
-        cur.close()
-        c.close()
-        return False, row["credits"] if row else 0
-    cur.execute("UPDATE users SET credits = credits - %s WHERE id=%s RETURNING credits", (amount, user_id))
-    new_c = cur.fetchone()["credits"]
-    cur.execute("INSERT INTO credit_transactions (user_id, amount, motivo) VALUES (%s,%s,%s)", (user_id, -amount, motivo))
-    c.commit()
-    cur.close()
-    c.close()
-    return True, new_c
 
 def active_spell(user_id, spell_code):
     try:
@@ -615,17 +598,23 @@ async def swipe(req: Request, to_user_id: int = Form(...), tipo: str = Form(...)
                     conv_id = conv_row["id"] if conv_row else None
                     # consegna eventuali messaggi swipe pagati
                     if conv_id:
-                        cur.execute("""
-                            SELECT id, from_user_id, contenuto FROM swipe_messages
-                            WHERE ((from_user_id=%s AND to_user_id=%s) OR (from_user_id=%s AND to_user_id=%s))
-                              AND delivered=0
-                        """, (user["id"], to_user_id, to_user_id, user["id"]))
-                        for sm in cur.fetchall():
-                            cur.execute(
-                                "INSERT INTO messages (conversation_id,sender_id,tipo,contenuto) VALUES (%s,%s,'testo',%s)",
-                                (conv_id, sm["from_user_id"], sm["contenuto"]),
-                            )
-                            cur.execute("UPDATE swipe_messages SET delivered=1 WHERE id=%s", (sm["id"],))
+                        try:
+                            cur.execute("""
+                                SELECT id, from_user_id, contenuto FROM swipe_messages
+                                WHERE ((from_user_id=%s AND to_user_id=%s) OR (from_user_id=%s AND to_user_id=%s))
+                                  AND COALESCE(delivered,0)=0
+                            """, (user["id"], to_user_id, to_user_id, user["id"]))
+                            for sm in cur.fetchall():
+                                cur.execute(
+                                    "INSERT INTO messages (conversation_id,sender_id,tipo,contenuto) VALUES (%s,%s,'testo',%s)",
+                                    (conv_id, sm["from_user_id"], sm["contenuto"]),
+                                )
+                                try:
+                                    cur.execute("UPDATE swipe_messages SET delivered=1 WHERE id=%s", (sm["id"],))
+                                except Exception:
+                                    pass
+                        except Exception as e_sm:
+                            print("deliver swipe_messages:", e_sm)
                     for uid in (user["id"], to_user_id):
                         cur.execute("INSERT INTO notifications (user_id,tipo,titolo,contenuto,related_id) VALUES (%s,'nuovo_match','Nuovo Match!','Hai un nuovo match!',%s)", (uid, mid))
                     match_created = True

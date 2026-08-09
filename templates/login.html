@@ -1,46 +1,26 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Accedi – MyCheating</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body { background-color: #0a0a0a; font-family: 'Oswald', sans-serif; }
-        .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
-        .btn-red { background: #ff1a1a; }
-        .btn-red:hover { background: #e60000; }
-        .text-red-pure { color: #ff1a1a; }
-        input:focus { border-color: #ff1a1a !important; outline: none; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login – MyCheating</title>
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>body{background:#0a0a0a;font-family:'Oswald',sans-serif}.font-hot{font-family:'Bebas Neue',sans-serif;letter-spacing:1px}</style>
 </head>
-<body class="min-h-screen flex items-center justify-center px-4">
-
-    <div class="w-full max-w-sm">
-        <div class="mb-10">
-            <h1 class="font-hot text-5xl text-white tracking-wide">ACCEDI</h1>
-            <div class="w-14 h-1 bg-[#ff1a1a] mt-2 mb-4"></div>
-            <p class="text-gray-400 text-sm">Bentornato. Il tuo mondo ti aspetta.</p>
-        </div>
-
-        <form method="post" action="/login" class="space-y-4">
-            <input type="email" name="email" required placeholder="Email"
-                   class="w-full bg-transparent border border-white/20 text-white placeholder-gray-500 rounded-lg px-4 py-3.5 text-sm">
-            <input type="password" name="password" required placeholder="Password"
-                   class="w-full bg-transparent border border-white/20 text-white placeholder-gray-500 rounded-lg px-4 py-3.5 text-sm">
-            <button type="submit" class="w-full btn-red text-white font-semibold py-3.5 rounded-lg tracking-wide mt-2">
-                ENTRA
-            </button>
-        </form>
-
-        <p class="text-center text-sm text-gray-500 mt-8">
-            Prima volta qui?
-            <a href="/register" class="text-red-pure font-medium hover:underline">Registrati gratis</a>
-        </p>
-    </div>
-
+<body class="text-white min-h-screen flex items-center justify-center p-4">
+  <div class="w-full max-w-md border border-white/10 rounded-2xl p-6 bg-black/60">
+    <h1 class="font-hot text-4xl text-[#ff0000] mb-4">LOGIN</h1>
+    {% if error %}<div class="mb-4 text-sm text-red-400">{{ error }}</div>{% endif %}
+    <form method="post" action="/login" class="space-y-3">
+      <input name="email" type="email" required placeholder="Email" class="w-full bg-black border border-white/20 rounded-xl px-4 py-2.5 text-sm">
+      <input name="password" type="password" required placeholder="Password" class="w-full bg-black border border-white/20 rounded-xl px-4 py-2.5 text-sm">
+      <button class="w-full bg-[#ff0000] py-3 rounded-xl font-semibold">Entra</button>
+    </form>
+    <p class="text-xs text-gray-500 mt-4 text-center">
+      <a href="/forgot-password" class="text-[#ff0000]">Password dimenticata</a> ·
+      <a href="/register" class="text-gray-400">Registrati</a>
+    </p>
+  </div>
 </body>
 </html>

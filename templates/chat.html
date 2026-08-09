@@ -111,11 +111,31 @@
 
     <!-- Messaggi -->
     <div class="flex-1 overflow-y-auto px-3 py-3 space-y-2" id="messages">
-      {% for msg in messaggi %}
-      <div class="flex {% if msg.sender_id == user.id %}justify-end{% else %}justify-start{% endif %} msg-row"
+      {% if not messaggi and icebreakers %}
+<div class="px-3 py-4 space-y-2">
+  <p class="text-xs text-gray-500 text-center">Rompi il ghiaccio 💬</p>
+  <div class="flex flex-wrap gap-2 justify-center">
+    {% for ib in icebreakers %}
+    <form method="post" action="/chat/{{ conversation_id }}/send">
+      <input type="hidden" name="contenuto" value="{{ ib }}">
+      <button type="submit" class="text-xs px-3 py-1.5 rounded-full border border-white/20 bg-white/5 hover:border-[#ff0000] hover:text-[#ff0000]">{{ ib }}</button>
+    </form>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{% for msg in messaggi %}
+            <!-- msg {{ msg.id }} -->
+
+      <div class="flex flex-col {% if msg.sender_id == user.id %}items-end{% else %}items-start{% endif %} gap-0.5">
+      <div class="flex {% if msg.sender_id == user.id %}justify-end{% else %}justify-start{% endif %} msg-row w-full"
            data-expires-in="{{ msg.expires_in if msg.expires_in is not none else '' }}" data-msg-id="{{ msg.id }}">
         <div class="max-w-[80%] px-3 py-2 rounded-2xl text-sm {% if msg.expires_in is not none %}msg-burn{% endif %}
-            {% if msg.sender_id == user.id %}bg-[#ff0000] text-white rounded-br-md{% else %}bg-white/10 rounded-bl-md{% endif %}">
+            {% if msg.sender_id == user.id %}bg-[#ff0000] text-white rounded-br-md{% else %}bg-white/10 rounded-bl-md{% endif %}"
+            data-msg-preview="{{ (msg.contenuto or '')[:60] }}">
+          {% if msg.reply_preview %}
+          <div class="text-[10px] opacity-80 border-l-2 border-white/40 pl-2 mb-1 truncate">↩ {{ msg.reply_preview }}</div>
+          {% endif %}
           {% set murl = msg.media_url or '' %}
           {% set mtype = msg.media_type or msg.tipo or '' %}
           {% if murl %}
@@ -164,6 +184,21 @@
             <button type="button" class="text-[10px] text-yellow-400/80 hover:text-yellow-300" title="Segnala"
               onclick="openReportUni({{ msg.sender_id }}, 'message', {{ msg.id }}, 'Segnala messaggio')">⚠️</button>
             {% endif %}
+            <button type="button" class="text-[10px] opacity-70" title="Rispondi"
+              onclick="setReply({{ msg.id }}, '{{ (msg.contenuto or 'media')|e }}')">↩</button>
+            <form method="post" action="/chat/{{ conversation_id }}/react/{{ msg.id }}" class="inline">
+              <input type="hidden" name="emoji" value="❤️">
+              <button type="submit" class="text-[10px]" title="Reazione">❤️</button>
+            </form>
+            <form method="post" action="/chat/{{ conversation_id }}/react/{{ msg.id }}" class="inline">
+              <input type="hidden" name="emoji" value="🔥">
+              <button type="submit" class="text-[10px]">🔥</button>
+            </form>
+            <form method="post" action="/chat/{{ conversation_id }}/react/{{ msg.id }}" class="inline">
+              <input type="hidden" name="emoji" value="😂">
+              <button type="submit" class="text-[10px]">😂</button>
+            </form>
+
           </div>
         </div>
       </div>
@@ -505,5 +540,49 @@ document.getElementById('report-modal-uni')?.addEventListener('click', e => {
 });
 </script>
 
+
+<script>
+function setReply(id, preview) {
+  var box = document.getElementById('reply-box');
+  var inp = document.getElementById('reply-to-id');
+  var prev = document.getElementById('reply-preview');
+  var form = document.getElementById('form-send') || document.querySelector('form[action*="/send"]');
+  if (inp) inp.value = id;
+  if (prev) prev.textContent = preview || '';
+  if (box) box.classList.remove('hidden');
+  // switch form to reply endpoint
+  if (form) {
+    form.setAttribute('data-orig-action', form.action);
+    form.action = form.action.replace(/\/send.*/, '/reply');
+  }
+}
+function clearReply() {
+  var box = document.getElementById('reply-box');
+  var inp = document.getElementById('reply-to-id');
+  var form = document.getElementById('form-send') || document.querySelector('form[action*="/reply"], form[action*="/send"]');
+  if (inp) inp.value = '';
+  if (box) box.classList.add('hidden');
+  if (form && form.getAttribute('data-orig-action')) form.action = form.getAttribute('data-orig-action');
+  else if (form) form.action = form.action.replace(/\/reply.*/, '/send');
+}
+</script>
+
+<form id="form-unmatch" method="post" action="/chat/{{ conversation_id }}/unmatch" class="hidden"></form>
+<script>
+document.getElementById('btn-unmatch')?.addEventListener('click', () => {
+  if (confirm('Togliere il match? Non vedrai più questa chat.')) document.getElementById('form-unmatch').submit();
+});
+</script>
+
+<script>
+// Long-press / click actions on messages
+document.querySelectorAll('[data-msg-id]').forEach(el => {
+  el.addEventListener('dblclick', () => {
+    const id = el.getAttribute('data-msg-id');
+    const prev = el.getAttribute('data-msg-preview') || '';
+    if (typeof setReply === 'function') setReply(id, prev);
+  });
+});
+</script>
 </body>
 </html>

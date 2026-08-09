@@ -343,14 +343,17 @@ async def reg(req: Request, email: str = Form(...), password: str = Form(...), u
     try:
         # controlli espliciti prima dell'INSERT
         cur.execute(
-            "SELECT id FROM users WHERE lower(email)=%s LIMIT 1",
+            "SELECT id, username, nome FROM users WHERE lower(email)=%s LIMIT 1",
             (email,),
         )
-        if cur.fetchone():
+        existing = cur.fetchone()
+        if existing:
+            nick = existing.get("username") or existing.get("nome") or "—"
             return templates.TemplateResponse("register.html", {
                 "request": req,
-                "error": "Questa email è già registrata. Accedi oppure usa «Password dimenticata».",
+                "error": f"Hai già un account con questa email. Nickname: @{nick}. Accedi oppure recupera la password (non possiamo mostrarti la password: è protetta).",
                 "already_registered": True,
+                "existing_username": nick,
                 "form": form_data,
             })
         cur.execute(
@@ -404,6 +407,148 @@ async def reg(req: Request, email: str = Form(...), password: str = Form(...), u
     finally:
         cur.close()
         c.close()
+
+
+@app.get("/forgot-password", response_class=HTMLResponse)
+async def forgot_password_page(req: Request):
+    return templates.TemplateResponse("forgot_password.html", {
+        "request": req, "step": "email", "error": None, "ok": None, "test_otp": None, "email": None, "username": None,
+    })
+
+
+@app.post("/forgot-password/send")
+async def forgot_password_send(req: Request, email: str = Form(...)):
+    email = (email or "").strip().lower()
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute("SELECT id, username, nome, email FROM users WHERE lower(email)=%s AND COALESCE(is_bot,0)=0 LIMIT 1", (email,))
+        u = cur.fetchone()
+    except Exception:
+        u = None
+    if not u:
+        cur.close(); c.close()
+        # non rivelare se email esiste? qui utente sta recuperando - messaggio generico + se non esiste chiaro
+        return templates.TemplateResponse("forgot_password.html", {
+            "request": req, "step": "email",
+            "error": "Nessun account con questa email.",
+            "ok": None, "test_otp": None, "email": email, "username": None,
+        })
+    import random
+    code = f"{random.randint(0, 999999):06d}"
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS email_otps (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                email VARCHAR(200) NOT NULL,
+                code VARCHAR(10) NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                used INTEGER DEFAULT 0,
+                phone VARCHAR(32),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        c.commit()
+    except Exception:
+        try: c.rollback()
+        except Exception: pass
+    try:
+        cur.execute(
+            """INSERT INTO email_otps (user_id, email, code, expires_at)
+               VALUES (%s,%s,%s, NOW() + interval '15 minutes')""",
+            (u["id"], email, code),
+        )
+        c.commit()
+    except Exception as e:
+        print("forgot otp:", e)
+        try: c.rollback()
+        except Exception: pass
+    cur.close(); c.close()
+    sent = send_otp_email(email, code)
+    try:
+        req.session["reset_user_id"] = u["id"]
+        req.session["reset_email"] = email
+        if not sent:
+            req.session["reset_test_otp"] = code
+        else:
+            req.session.pop("reset_test_otp", None)
+    except Exception:
+        pass
+    return templates.TemplateResponse("forgot_password.html", {
+        "request": req, "step": "otp",
+        "error": None,
+        "ok": "Codice inviato" if sent else None,
+        "test_otp": None if sent else code,
+        "email": email,
+        "username": u.get("username"),
+    })
+
+
+@app.post("/forgot-password/reset")
+async def forgot_password_reset(req: Request, otp: str = Form(...), password: str = Form(...), password2: str = Form(...)):
+    email = (req.session.get("reset_email") or "").strip().lower()
+    uid = req.session.get("reset_user_id")
+    if not email or not uid:
+        return RedirectResponse("/forgot-password", 303)
+    if (password or "") != (password2 or ""):
+        return templates.TemplateResponse("forgot_password.html", {
+            "request": req, "step": "otp", "error": "Le password non coincidono",
+            "ok": None, "test_otp": req.session.get("reset_test_otp"), "email": email,
+            "username": None,
+        })
+    if len(password or "") < 6:
+        return templates.TemplateResponse("forgot_password.html", {
+            "request": req, "step": "otp", "error": "Password minimo 6 caratteri",
+            "ok": None, "test_otp": req.session.get("reset_test_otp"), "email": email,
+            "username": None,
+        })
+    code = "".join(ch for ch in otp if ch.isdigit())
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute(
+            """SELECT id FROM email_otps WHERE user_id=%s AND email=%s AND code=%s AND used=0 AND expires_at > NOW()
+               ORDER BY id DESC LIMIT 1""",
+            (uid, email, code),
+        )
+        row = cur.fetchone()
+        if not row:
+            cur.close(); c.close()
+            return templates.TemplateResponse("forgot_password.html", {
+                "request": req, "step": "otp", "error": "Codice errato o scaduto",
+                "ok": None, "test_otp": req.session.get("reset_test_otp"), "email": email,
+                "username": None,
+            })
+        cur.execute("UPDATE email_otps SET used=1 WHERE id=%s", (row["id"],))
+        cur.execute("UPDATE users SET password_hash=%s WHERE id=%s", (hash_pw(password), uid))
+        # recupera nick
+        cur.execute("SELECT username FROM users WHERE id=%s", (uid,))
+        u = cur.fetchone()
+        c.commit()
+    except Exception as e:
+        print("reset pw:", e)
+        try: c.rollback()
+        except Exception: pass
+        cur.close(); c.close()
+        return templates.TemplateResponse("forgot_password.html", {
+            "request": req, "step": "otp", "error": "Errore reset", "ok": None,
+            "test_otp": None, "email": email, "username": None,
+        })
+    cur.close(); c.close()
+    try:
+        req.session.pop("reset_user_id", None)
+        req.session.pop("reset_email", None)
+        req.session.pop("reset_test_otp", None)
+    except Exception:
+        pass
+    return templates.TemplateResponse("forgot_password.html", {
+        "request": req, "step": "done",
+        "error": None, "ok": "Password aggiornata",
+        "test_otp": None, "email": email,
+        "username": (u or {}).get("username"),
+    })
+
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(req: Request):
@@ -982,7 +1127,8 @@ async def chat_page(req: Request, conversation_id: int):
         try:
             try:
                 cur.execute(
-                    """SELECT id, conversation_id, sender_id, contenuto, data_invio, media_url, media_type, expires_at
+                    """SELECT id, conversation_id, sender_id, contenuto, data_invio, media_url, media_type, expires_at,
+                          COALESCE(reply_to_id, NULL) as reply_to_id, COALESCE(letto,0) as letto
                        FROM messages WHERE conversation_id=%s
                          AND (expires_at IS NULL OR expires_at > NOW() - interval '2 seconds')
                        ORDER BY id ASC LIMIT 500""",
@@ -1069,6 +1215,45 @@ async def chat_page(req: Request, conversation_id: int):
             except Exception:
                 pass
 
+        # 4b) reazioni + reply preview
+        try:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS message_reactions (
+                    id SERIAL PRIMARY KEY,
+                    message_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    emoji VARCHAR(16) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(message_id, user_id)
+                )
+            """)
+            c.commit()
+        except Exception:
+            try: c.rollback()
+            except Exception: pass
+        try:
+            ids = [m["id"] for m in messaggi if m.get("id")]
+            reactions_map = {}
+            if ids:
+                cur.execute(
+                    "SELECT message_id, emoji, user_id FROM message_reactions WHERE message_id = ANY(%s)",
+                    (ids,),
+                )
+                for r in cur.fetchall():
+                    reactions_map.setdefault(r["message_id"], []).append(dict(r))
+            by_id = {m["id"]: m for m in messaggi if m.get("id")}
+            for m in messaggi:
+                m["reactions"] = reactions_map.get(m["id"], [])
+                rid = m.get("reply_to_id")
+                if rid and rid in by_id:
+                    m["reply_preview"] = (by_id[rid].get("contenuto") or "media")[:80]
+                else:
+                    m["reply_preview"] = None
+        except Exception as e:
+            print("reactions load:", e)
+            try: c.rollback()
+            except Exception: pass
+
         # 5) photo access (optional)
         try:
             cur.execute(
@@ -1112,6 +1297,13 @@ async def chat_page(req: Request, conversation_id: int):
         ur = 0
 
     try:
+        icebreakers = [
+            "Ciao! Come va oggi? 😊",
+            "Cosa ti ha portato su MyCheating?",
+            "Film o serie preferita?",
+            "Aperitivo o cena?",
+            "Qual è il tuo posto preferito in città?",
+        ]
         return templates.TemplateResponse("chat.html", {
             "request": req,
             "user": user,
@@ -1122,6 +1314,7 @@ async def chat_page(req: Request, conversation_id: int):
             "photo_access": photo_access,
             "pending_request": pending_request,
             "photo_cost": 25,
+            "icebreakers": icebreakers,
         })
     except Exception as e:
         print("chat template error:", type(e).__name__, e)
@@ -1496,6 +1689,133 @@ async def chat_block(req: Request, conversation_id: int):
         cur.close()
         c.close()
     return RedirectResponse("/chats?blocked=1", 303)
+
+
+
+@app.post("/chat/{conversation_id}/reply")
+async def chat_reply(req: Request, conversation_id: int, reply_to_id: int = Form(...), contenuto: str = Form(...)):
+    """Rispondi a un messaggio specifico (stile IG/WA)."""
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    contenuto = (contenuto or "").strip()
+    if not contenuto:
+        return RedirectResponse(f"/chat/{conversation_id}", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute("""SELECT c.id, m.user1_id, m.user2_id FROM conversations c
+               JOIN matches m ON m.id = c.match_id WHERE c.id=%s""", (conversation_id,))
+        conv = cur.fetchone()
+        if not conv or user["id"] not in (conv["user1_id"], conv["user2_id"]):
+            cur.close(); c.close()
+            return RedirectResponse("/chats", 303)
+        try:
+            cur.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id INTEGER")
+            c.commit()
+        except Exception:
+            try: c.rollback()
+            except Exception: pass
+        cur.execute(
+            """INSERT INTO messages (conversation_id, sender_id, tipo, contenuto, reply_to_id)
+               VALUES (%s,%s,'testo',%s,%s)""",
+            (conversation_id, user["id"], contenuto[:2000], reply_to_id),
+        )
+        try:
+            cur.execute("UPDATE conversations SET ultimo_messaggio_at=CURRENT_TIMESTAMP WHERE id=%s", (conversation_id,))
+        except Exception:
+            pass
+        altro = conv["user2_id"] if user["id"] == conv["user1_id"] else conv["user1_id"]
+        try:
+            cur.execute(
+                "INSERT INTO notifications (user_id,tipo,titolo,contenuto,related_id) VALUES (%s,'nuovo_messaggio',%s,%s,%s)",
+                (altro, f"Risposta da {user.get('nome') or 'utente'}", contenuto[:80], conversation_id),
+            )
+        except Exception:
+            pass
+        c.commit()
+    except Exception as e:
+        print("chat reply:", e)
+        try: c.rollback()
+        except Exception: pass
+    cur.close(); c.close()
+    return RedirectResponse(f"/chat/{conversation_id}", 303)
+
+
+@app.post("/chat/{conversation_id}/react/{message_id}")
+async def chat_react(req: Request, conversation_id: int, message_id: int, emoji: str = Form("❤️")):
+    """Reazione emoji a un messaggio (stile IG/FB)."""
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    emoji = (emoji or "❤️")[:8]
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS message_reactions (
+                id SERIAL PRIMARY KEY,
+                message_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                emoji VARCHAR(16) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(message_id, user_id)
+            )
+        """)
+        c.commit()
+    except Exception:
+        try: c.rollback()
+        except Exception: pass
+    try:
+        cur.execute(
+            """INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (%s,%s,%s)
+               ON CONFLICT (message_id, user_id) DO UPDATE SET emoji=EXCLUDED.emoji""",
+            (message_id, user["id"], emoji),
+        )
+        c.commit()
+    except Exception as e:
+        print("react:", e)
+        try:
+            c.rollback()
+            cur.execute("DELETE FROM message_reactions WHERE message_id=%s AND user_id=%s", (message_id, user["id"]))
+            cur.execute(
+                "INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (%s,%s,%s)",
+                (message_id, user["id"], emoji),
+            )
+            c.commit()
+        except Exception as e2:
+            print("react2:", e2)
+            try: c.rollback()
+            except Exception: pass
+    cur.close(); c.close()
+    return RedirectResponse(f"/chat/{conversation_id}", 303)
+
+
+@app.post("/chat/{conversation_id}/unmatch")
+async def chat_unmatch(req: Request, conversation_id: int):
+    """Togli match e chiudi chat (stile Tinder)."""
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute("""SELECT c.id, c.match_id, m.user1_id, m.user2_id FROM conversations c
+               JOIN matches m ON m.id = c.match_id WHERE c.id=%s""", (conversation_id,))
+        conv = cur.fetchone()
+        if not conv or user["id"] not in (conv["user1_id"], conv["user2_id"]):
+            cur.close(); c.close()
+            return RedirectResponse("/chats", 303)
+        mid = conv.get("match_id")
+        if mid:
+            cur.execute("UPDATE matches SET attivo=0 WHERE id=%s", (mid,))
+        c.commit()
+    except Exception as e:
+        print("unmatch:", e)
+        try: c.rollback()
+        except Exception: pass
+    cur.close(); c.close()
+    return RedirectResponse("/chats?unmatched=1", 303)
 
 
 @app.post("/chat/{conversation_id}/report")

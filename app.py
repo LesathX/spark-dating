@@ -148,6 +148,7 @@ SUPABASE_SERVICE_KEY = os.environ.get(
     os.environ.get("SUPABASE_KEY", ""),  # service_role key consigliata
 )
 STORAGE_BUCKET = os.environ.get("STORAGE_BUCKET", "gallery")
+CHAT_STORAGE_BUCKET = os.environ.get("CHAT_STORAGE_BUCKET", "chat")
 
 
 SPELLS = {
@@ -1211,13 +1212,13 @@ async def send_media(req: Request, conversation_id: int):
         if ext not in ("webm", "mp3", "ogg", "m4a", "wav"):
             ext = "webm"
 
-    storage_path = f"chat/{user['id']}/{uuid.uuid4().hex}.{ext}"
+    storage_path = f"{user['id']}/{uuid.uuid4().hex}.{ext}"
     url = None
 
-    # 1) Supabase Storage
+    # 1) Supabase Storage — bucket dedicato chat
     try:
         if storage_enabled():
-            url = await storage_upload(storage_path, data, content_type)
+            url = await storage_upload(storage_path, data, content_type, bucket=CHAT_STORAGE_BUCKET)
             print("send_media storage ok:", url[:80] if url else None)
     except Exception as e:
         print("send_media storage fail:", e)
@@ -1377,12 +1378,20 @@ async def chat_block(req: Request, conversation_id: int):
 
 
 @app.post("/chat/{conversation_id}/report")
-async def chat_report(req: Request, conversation_id: int, motivo: str = Form("segnalazione")):
+async def chat_report(req: Request, conversation_id: int, motivo: str = Form("")):
+    """Segnala + blocca + notifica admin/mod + auto-sospensione a 5 report."""
     user = current_user(req)
     if not user:
         return RedirectResponse("/login", 303)
+    motivo = (motivo or "").strip()
+    if len(motivo) < 3:
+        return RedirectResponse(f"/chat/{conversation_id}?err=motivo", 303)
+
     c = db()
     cur = c.cursor()
+    altro_id = None
+    auto_sospeso = False
+    report_count = 0
     try:
         cur.execute("""SELECT m.user1_id, m.user2_id FROM conversations c
                JOIN matches m ON m.id = c.match_id WHERE c.id=%s""", (conversation_id,))
@@ -1392,31 +1401,241 @@ async def chat_report(req: Request, conversation_id: int, motivo: str = Form("se
             c.close()
             return RedirectResponse("/chats", 303)
         altro_id = conv["user2_id"] if user["id"] == conv["user1_id"] else conv["user1_id"]
+
+        # evita admin/mod auto-ban accidentale da report massivi
+        try:
+            cur.execute("SELECT is_admin, is_mod, ruolo, nome FROM users WHERE id=%s", (altro_id,))
+            target = cur.fetchone() or {}
+        except Exception:
+            target = {}
+        target_nome = (target.get("nome") if isinstance(target, dict) else None) or str(altro_id)
+
+        # tabella reports
+        try:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS reports (
+                    id SERIAL PRIMARY KEY,
+                    reporter_id INTEGER,
+                    reported_id INTEGER,
+                    motivo TEXT,
+                    conversation_id INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            c.commit()
+        except Exception:
+            try:
+                c.rollback()
+            except Exception:
+                pass
+
+        # un solo report per reporter→reported (evita spam segnalazioni)
         try:
             cur.execute(
-                """INSERT INTO reports (reporter_id, reported_id, motivo, conversation_id)
-                   VALUES (%s,%s,%s,%s)""",
-                (user["id"], altro_id, (motivo or "segnalazione")[:200], conversation_id),
+                "SELECT id FROM reports WHERE reporter_id=%s AND reported_id=%s LIMIT 1",
+                (user["id"], altro_id),
             )
-        except Exception as e:
-            print("report table?:", e)
-            c.rollback()
-            # fallback notification to all admins
+            already = cur.fetchone()
+        except Exception:
+            already = None
             try:
-                cur.execute("SELECT id FROM users WHERE COALESCE(is_admin,0)=1")
-                for a in cur.fetchall():
-                    cur.execute(
-                        "INSERT INTO notifications (user_id,tipo,titolo,contenuto,related_id) VALUES (%s,'report',%s,%s,%s)",
-                        (a["id"], "Segnalazione", f"User {user['id']} segnala {altro_id}: {motivo}", altro_id),
-                    )
-            except Exception as e2:
-                print("report notif:", e2)
                 c.rollback()
+            except Exception:
+                pass
+
+        if not already:
+            try:
+                cur.execute(
+                    """INSERT INTO reports (reporter_id, reported_id, motivo, conversation_id)
+                       VALUES (%s,%s,%s,%s)""",
+                    (user["id"], altro_id, motivo[:500], conversation_id),
+                )
+            except Exception as e:
+                print("report insert:", e)
+                try:
+                    c.rollback()
+                except Exception:
+                    pass
+
+        # conta segnalazioni distinte (reporter diversi)
+        try:
+            cur.execute(
+                "SELECT COUNT(DISTINCT reporter_id) AS n FROM reports WHERE reported_id=%s",
+                (altro_id,),
+            )
+            row = cur.fetchone()
+            report_count = int((row["n"] if row else 0) or 0)
+        except Exception as e:
+            print("report count:", e)
+            try:
+                c.rollback()
+            except Exception:
+                pass
+            report_count = 0
+
+        # blocco bilaterale lato reporter
+        try:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS blocks (
+                    id SERIAL PRIMARY KEY,
+                    blocker_id INTEGER,
+                    blocked_id INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(blocker_id, blocked_id)
+                )
+            """)
+            c.commit()
+        except Exception:
+            try:
+                c.rollback()
+            except Exception:
+                pass
+        try:
+            cur.execute(
+                "INSERT INTO blocks (blocker_id, blocked_id) VALUES (%s,%s) ON CONFLICT DO NOTHING",
+                (user["id"], altro_id),
+            )
+        except Exception:
+            try:
+                c.rollback()
+                cur.execute(
+                    "INSERT INTO blocks (blocker_id, blocked_id) VALUES (%s,%s)",
+                    (user["id"], altro_id),
+                )
+            except Exception as e:
+                print("report block:", e)
+                try:
+                    c.rollback()
+                except Exception:
+                    pass
+
+        # disattiva match
+        try:
+            u1, u2 = sorted([user["id"], altro_id])
+            cur.execute(
+                "UPDATE matches SET attivo=0 WHERE (user1_id=%s AND user2_id=%s) OR (user1_id=%s AND user2_id=%s)",
+                (u1, u2, u2, u1),
+            )
+        except Exception:
+            try:
+                c.rollback()
+            except Exception:
+                pass
+
+        # auto-sospensione chat a 5 segnalazioni (non admin)
+        is_staff = False
+        if isinstance(target, dict):
+            is_staff = bool(target.get("is_admin") or target.get("is_mod") or target.get("ruolo") in ("admin", "mod"))
+        if report_count >= 5 and not is_staff:
+            try:
+                cur.execute(
+                    """UPDATE users SET
+                           stato = CASE WHEN COALESCE(stato,'') = 'bannato' THEN stato ELSE 'sospeso' END,
+                           sospeso_fino = NOW() + interval '7 days',
+                           updated_at = NOW()
+                       WHERE id=%s""",
+                    (altro_id,),
+                )
+                auto_sospeso = True
+            except Exception as e:
+                print("auto sospeso:", e)
+                try:
+                    c.rollback()
+                    cur.execute(
+                        "UPDATE users SET stato='sospeso' WHERE id=%s",
+                        (altro_id,),
+                    )
+                    auto_sospeso = True
+                except Exception as e2:
+                    print("auto sospeso2:", e2)
+                    try:
+                        c.rollback()
+                    except Exception:
+                        pass
+            # restrizione chat esplicita
+            try:
+                cur.execute("""
+                    INSERT INTO user_restrictions (user_id, no_chat, no_messaggi)
+                    VALUES (%s, 1, 1)
+                    ON CONFLICT (user_id) DO UPDATE SET no_chat=1, no_messaggi=1
+                """, (altro_id,))
+            except Exception as e:
+                print("restrizioni report:", e)
+                try:
+                    c.rollback()
+                except Exception:
+                    pass
+
+        # notifiche a TUTTI admin e moderatori
+        staff_ids = []
+        try:
+            cur.execute("""
+                SELECT id FROM users
+                WHERE COALESCE(is_admin,0)=1
+                   OR COALESCE(is_mod,0)=1
+                   OR COALESCE(ruolo,'') IN ('admin','mod')
+            """)
+            staff_ids = [r["id"] for r in cur.fetchall()]
+        except Exception as e:
+            print("staff list:", e)
+            try:
+                c.rollback()
+            except Exception:
+                pass
+
+        titolo = "🚨 SEGNALAZIONE URGENTE" if auto_sospeso else "⚠️ Nuova segnalazione"
+        corpo = (
+            f"{user.get('nome') or user['id']} ha segnalato {target_nome} (id {altro_id}). "
+            f"Motivo: {motivo[:150]}. Report totali: {report_count}."
+        )
+        if auto_sospeso:
+            corpo += " Utente SOSPESO automaticamente (7 giorni) — intervento staff richiesto."
+
+        for sid in staff_ids:
+            try:
+                cur.execute(
+                    """INSERT INTO notifications (user_id, tipo, titolo, contenuto, related_id)
+                       VALUES (%s, %s, %s, %s, %s)""",
+                    (sid, "report_urgente" if auto_sospeso else "report", titolo, corpo[:400], altro_id),
+                )
+            except Exception as e:
+                print("report notif staff:", e)
+                try:
+                    c.rollback()
+                except Exception:
+                    pass
+
+        # notifica all'utente sospeso
+        if auto_sospeso:
+            try:
+                cur.execute(
+                    """INSERT INTO notifications (user_id, tipo, titolo, contenuto, related_id)
+                       VALUES (%s, 'sospensione', %s, %s, %s)""",
+                    (altro_id, "Account sospeso",
+                     "Hai ricevuto molte segnalazioni. Chat temporaneamente sospesa (7 giorni). Contatta il supporto.",
+                     user["id"]),
+                )
+            except Exception:
+                try:
+                    c.rollback()
+                except Exception:
+                    pass
+
         c.commit()
+    except Exception as e:
+        print("chat_report fatal:", e)
+        try:
+            c.rollback()
+        except Exception:
+            pass
     finally:
-        cur.close()
-        c.close()
-    return RedirectResponse(f"/chat/{conversation_id}?reported=1", 303)
+        try:
+            cur.close()
+            c.close()
+        except Exception:
+            pass
+
+    return RedirectResponse("/chats?reported=1&blocked=1", 303)
 
 
 @app.get("/profile", response_class=HTMLResponse)
@@ -2851,15 +3070,18 @@ def _storage_request(method: str, url: str, data: bytes = None, content_type: st
         return 0, str(e)
 
 
-async def storage_upload(path: str, data: bytes, content_type: str) -> str:
-    """Carica su Supabase Storage. Ritorna URL pubblico."""
-    url = f"{SUPABASE_URL}/storage/v1/object/{STORAGE_BUCKET}/{path}"
+async def storage_upload(path: str, data: bytes, content_type: str, bucket: str = None) -> str:
+    """Carica su Supabase Storage. Ritorna URL pubblico.
+    bucket: se None usa STORAGE_BUCKET (gallery); per chat passa CHAT_STORAGE_BUCKET.
+    """
+    b = (bucket or STORAGE_BUCKET).strip() or STORAGE_BUCKET
+    url = f"{SUPABASE_URL}/storage/v1/object/{b}/{path}"
     status, body = _storage_request("POST", url, data=data, content_type=content_type)
     if status not in (200, 201):
         status, body = _storage_request("PUT", url, data=data, content_type=content_type)
     if status not in (200, 201):
-        raise RuntimeError(f"Storage {status}: {body[:500]}")
-    return f"{SUPABASE_URL}/storage/v1/object/public/{STORAGE_BUCKET}/{path}"
+        raise RuntimeError(f"Storage {b} {status}: {body[:500]}")
+    return f"{SUPABASE_URL}/storage/v1/object/public/{b}/{path}"
 
 
 async def storage_upload_stream(path: str, file_obj, content_type: str, max_bytes: int) -> tuple:
@@ -2914,6 +3136,7 @@ async def admin_storage_test(req: Request):
     info = {
         "supabase_url": SUPABASE_URL,
         "bucket": STORAGE_BUCKET,
+        "chat_bucket": CHAT_STORAGE_BUCKET,
         "key_set": bool(SUPABASE_SERVICE_KEY),
         "key_prefix": (SUPABASE_SERVICE_KEY[:12] + "...") if SUPABASE_SERVICE_KEY else None,
         "storage_enabled": storage_enabled(),
@@ -2934,6 +3157,15 @@ async def admin_storage_test(req: Request):
         )
         info["upload_status"] = status_u
         info["upload_body"] = body_u[:500]
+        # test bucket chat dedicato
+        status_c, body_c = _storage_request(
+            "POST",
+            f"{SUPABASE_URL}/storage/v1/object/{CHAT_STORAGE_BUCKET}/{test_path}",
+            data=b"ok-chat",
+            content_type="text/plain",
+        )
+        info["chat_upload_status"] = status_c
+        info["chat_upload_body"] = body_c[:500]
         info["ok"] = status_u in (200, 201)
         return JSONResponse(info)
     except Exception as e:

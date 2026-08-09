@@ -83,10 +83,7 @@
       <form method="post" action="/chat/{{ conversation_id }}/block" onsubmit="return confirm('Bloccare {{ altro.nome }}?')">
         <button class="w-full text-left px-4 py-3 hover:bg-white/5 border-b border-white/5 text-red-400">🚫 Blocca</button>
       </form>
-      <form method="post" action="/chat/{{ conversation_id }}/report">
-        <input type="hidden" name="motivo" value="segnalazione_utente">
-        <button class="w-full text-left px-4 py-3 hover:bg-white/5 text-yellow-400">⚠️ Segnala</button>
-      </form>
+      <button type="button" id="btn-report-menu" class="w-full text-left px-4 py-3 hover:bg-white/5 text-yellow-400">⚠️ Segnala</button>
     </div>
 
     <!-- Gallery privata (compatta) -->
@@ -181,10 +178,7 @@
       <form method="post" action="/chat/{{ conversation_id }}/block" class="inline" onsubmit="return confirm('Bloccare?')">
         <button type="submit" class="bg-white/5 border border-white/15 text-xs px-2.5 py-1.5 rounded-xl text-red-400">🚫</button>
       </form>
-      <form method="post" action="/chat/{{ conversation_id }}/report" class="inline">
-        <input type="hidden" name="motivo" value="segnalazione">
-        <button type="submit" class="bg-white/5 border border-white/15 text-xs px-2.5 py-1.5 rounded-xl text-yellow-400">⚠️</button>
-      </form>
+      <button type="button" id="btn-report-bar" class="bg-white/5 border border-white/15 text-xs px-2.5 py-1.5 rounded-xl text-yellow-400">⚠️</button>
       <label class="bg-white/5 border border-white/15 text-xs px-2.5 py-1.5 rounded-xl cursor-pointer">
         📷<input type="file" id="file-photo" accept="image/*" class="hidden">
       </label>
@@ -373,7 +367,29 @@
     }
   });
 
-    // Auto-destroy basato su secondi rimanenti dal server (affidabile)
+    
+  // Report popup
+  const reportModal = document.getElementById('report-modal');
+  function openReport() {
+    document.getElementById('more-menu')?.classList.add('hidden');
+    reportModal?.classList.remove('hidden');
+    document.getElementById('report-motivo')?.focus();
+  }
+  function closeReport() {
+    reportModal?.classList.add('hidden');
+  }
+  document.getElementById('btn-report-menu')?.addEventListener('click', openReport);
+  document.getElementById('btn-report-bar')?.addEventListener('click', openReport);
+  document.getElementById('report-cancel')?.addEventListener('click', closeReport);
+  reportModal?.addEventListener('click', (e) => { if (e.target === reportModal) closeReport(); });
+  document.querySelectorAll('.motivo-quick').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ta = document.getElementById('report-motivo');
+      if (ta) ta.value = btn.textContent.trim();
+    });
+  });
+
+  // Auto-destroy basato su secondi rimanenti dal server (affidabile)
   function fmtLeft(s) {
     s = Math.max(0, Math.ceil(s));
     if (s < 60) return s + 's';
@@ -410,5 +426,31 @@
 
 })();
 </script>
+
+<!-- Popup segnalazione -->
+<div id="report-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+  <div class="w-full max-w-sm bg-[#111] border border-white/15 rounded-2xl p-5 shadow-xl">
+    <h2 class="font-hot text-2xl tracking-wide text-[#ff0000] mb-1">SEGNALA</h2>
+    <p class="text-sm text-gray-400 mb-4">Segnala <strong class="text-white">{{ altro.nome or altro.username }}</strong> e bloccalo. L’admin riceverà il motivo.</p>
+    <form method="post" action="/chat/{{ conversation_id }}/report" id="form-report">
+      <label class="text-xs text-gray-500 block mb-1">Motivo della segnalazione *</label>
+      <textarea name="motivo" id="report-motivo" required minlength="3" rows="4"
+        placeholder="Descrivi il problema (spam, molestie, profilo falso…)"
+        class="w-full bg-black border border-white/20 rounded-xl px-3 py-2 text-sm text-white mb-3 outline-none focus:border-[#ff0000]"></textarea>
+      <div class="flex flex-wrap gap-2 mb-4">
+        <button type="button" class="motivo-quick text-[10px] px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-gray-300">Spam</button>
+        <button type="button" class="motivo-quick text-[10px] px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-gray-300">Molestie</button>
+        <button type="button" class="motivo-quick text-[10px] px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-gray-300">Profilo falso</button>
+        <button type="button" class="motivo-quick text-[10px] px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-gray-300">Contenuti offensivi</button>
+      </div>
+      <p class="text-[11px] text-yellow-500/90 mb-3">⚠️ L’utente verrà anche <strong>bloccato</strong> e non potrete più scrivervi.</p>
+      <div class="flex gap-2">
+        <button type="button" id="report-cancel" class="flex-1 py-2.5 rounded-xl border border-white/20 text-sm text-gray-300">Annulla</button>
+        <button type="submit" class="flex-1 py-2.5 rounded-xl bg-[#ff0000] text-white text-sm font-semibold">Segnala e blocca</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 </body>
 </html>

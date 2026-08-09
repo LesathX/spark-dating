@@ -1954,8 +1954,12 @@ def _send_sms_otp(phone_e164: str, code: str) -> tuple:
 
 
 
+_last_smtp_error = None
+
 def send_otp_email(to_email: str, code: str, phone: str = None) -> bool:
     """Invia OTP via SMTP. Gestisce cert SSL non validi (hosting condivisi)."""
+    global _last_smtp_error
+    _last_smtp_error = None
     import os, smtplib, ssl
     from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
@@ -1968,12 +1972,12 @@ def send_otp_email(to_email: str, code: str, phone: str = None) -> bool:
     except Exception:
         port = 465
     from_addr = (os.environ.get("SMTP_FROM") or user or "admin@mycheating.it").strip()
-    # hosting tipo coderick: certificato spesso non matcha l'hostname
     verify_ssl = (os.environ.get("SMTP_SSL_VERIFY") or "0").strip().lower() in ("1", "true", "yes")
 
     print(f"[SMTP] host={host!r} port={port} user={user!r} from={from_addr!r} to={to_email!r} pass_set={bool(password)} pass_len={len(password)} ssl_verify={verify_ssl}")
 
     if not (host and user and password and to_email):
+        _last_smtp_error = "missing SMTP_HOST/USER/PASS or recipient"
         print(f"[EMAIL OTP TEST] missing config — code={code} to={to_email}")
         return False
 
@@ -2010,18 +2014,17 @@ def send_otp_email(to_email: str, code: str, phone: str = None) -> bool:
                 raise RuntimeError(f"sendmail refused: {refused}")
 
     attempts = []
-    # prima con verify se richiesto, poi sempre senza verify (necessario per molti hosting)
-    contexts = [ctx_secure] if verify_ssl else []
+    contexts = []
+    if verify_ssl:
+        contexts.append(ctx_secure)
     contexts.append(ctx_insecure)
 
     for ctx in contexts:
         tag = "verify" if ctx is ctx_secure else "no-verify"
         if port == 587:
-            attempts.append((try_starttls, 587, ctx, tag))
-            attempts.append((try_ssl, 465, ctx, tag))
+            attempts += [(try_starttls, 587, ctx, tag), (try_ssl, 465, ctx, tag)]
         else:
-            attempts.append((try_ssl, 465 if port == 465 else port, ctx, tag))
-            attempts.append((try_starttls, 587, ctx, tag))
+            attempts += [(try_ssl, 465 if port in (465, 0) else port, ctx, tag), (try_starttls, 587, ctx, tag)]
 
     errors = []
     seen = set()
@@ -2034,13 +2037,15 @@ def send_otp_email(to_email: str, code: str, phone: str = None) -> bool:
             print(f"[SMTP] trying {fn.__name__} port={p} ssl={tag}…")
             fn(p, ctx)
             print(f"[EMAIL OTP OK] sent to {to_email} via {fn.__name__}:{p} ({tag})")
+            _last_smtp_error = None
             return True
         except Exception as e:
             err = f"{fn.__name__}:{p}:{tag} -> {type(e).__name__}: {e}"
             print("[SMTP] fail", err)
             errors.append(err)
 
-    print("[SMTP] all attempts failed:", " | ".join(errors))
+    _last_smtp_error = " | ".join(errors) if errors else "unknown"
+    print("[SMTP] all attempts failed:", _last_smtp_error)
     print(f"[EMAIL OTP TEST fallback] {to_email} code={code}")
     return False
 
@@ -4543,7 +4548,13 @@ async def admin_smtp_test(req: Request):
         return JSONResponse({**info, "ok": False, "error": "passa ?to=email@dominio.com"})
     code = "123456"
     ok = send_otp_email(to, code, phone="+390000000000")
-    return JSONResponse({**info, "ok": ok, "note": "Se ok=false leggi i log Render (smtp send / SMTP fail). Se ok=true controlla inbox+spam."})
+    return JSONResponse({
+        **info,
+        "ok": ok,
+        "error": _last_smtp_error,
+        "code_version": "smtp-ssl-novverify-2",
+        "note": "Se ok=false guarda error. Se ok=true controlla inbox+spam di " + to,
+    })
 
 
 @app.get("/admin/storage-test")

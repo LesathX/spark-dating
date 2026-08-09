@@ -1,147 +1,42 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MyCheating – Trova chi cerchi</title>
-    
-    <!-- Font HOT -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#ff0000">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="MyCheating">
+  <link rel="manifest" href="/static/manifest.json">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
 
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body {
-            background-color: #0a0a0a;
-            font-family: 'Oswald', sans-serif;
-        }
-        .font-hot {
-            font-family: 'Bebas Neue', sans-serif;
-            letter-spacing: 1px;
-        }
-        .btn-red {
-            background: #ff1a1a;
-        }
-        .btn-red:hover {
-            background: #e60000;
-        }
-        .text-red-pure {
-            color: #ff1a1a;
-        }
-        .border-red-pure {
-            border-color: #ff1a1a;
-        }
-    </style>
+  <title>MyCheating</title>
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background:#0a0a0a; font-family:'Oswald',sans-serif; }
+    .font-hot { font-family:'Bebas Neue',sans-serif; letter-spacing:1px; }
+  </style>
 </head>
-<body class="text-white min-h-screen">
+<body class="text-white min-h-screen flex flex-col items-center justify-center p-6">
+  <div class="text-center max-w-md">
+    <div class="text-6xl mb-2">🔥</div>
+    <h1 class="font-hot text-5xl tracking-wide text-[#ff0000] mb-2">MYCHEATING</h1>
+    <p class="text-gray-400 text-sm mb-8">Incontri e chat · solo 18+</p>
+    <a href="/login" class="block w-full bg-[#ff0000] py-3 rounded-xl font-semibold mb-3">Accedi</a>
+    <a href="/register" class="block w-full border border-white/20 py-3 rounded-xl">Registrati</a>
+    <p class="text-xs text-gray-600 mt-8">Su telefono: menu browser → «Aggiungi a Home» per usarla come app.</p>
+  </div>
 
-    <!-- Navbar -->
-    <nav class="flex items-center justify-between px-6 py-4 border-b border-white/10">
-        <div class="flex items-center gap-2 font-hot text-xl tracking-wider">
-            <span class="text-red-pure text-2xl">🔥</span>
-            MY CHEATING
-        </div>
-        <a href="/login" class="border border-red-pure text-red-pure text-sm font-semibold px-5 py-2 rounded hover:bg-red-pure hover:text-white transition tracking-wide">
-            ACCEDI
-        </a>
-    </nav>
-
-    <!-- Hero -->
-    <section class="max-w-6xl mx-auto px-6 py-16 md:py-24 grid md:grid-cols-2 gap-12 items-center">
-        
-        <!-- Testo sinistra -->
-        <div>
-            <p class="text-red-pure text-sm font-medium tracking-[3px] mb-4 uppercase">— Incontri Reali</p>
-            <h1 class="font-hot text-6xl md:text-7xl leading-[0.9] mb-6">
-                TROVA<br>
-                CHI<br>
-                <span class="text-red-pure">CERCHI</span>
-            </h1>
-            <p class="text-gray-400 text-lg mb-8 max-w-md leading-relaxed font-light">
-                La piattaforma più diretta per incontrare persone reali vicino a te. Profili verificati, chat privata, galleria personale.
-            </p>
-            <div class="flex flex-wrap gap-4">
-                <a href="/register" class="btn-red text-white font-semibold px-8 py-3.5 rounded tracking-wide">
-                    REGISTRATI GRATIS →
-                </a>
-                <a href="/login" class="border border-white/20 text-white font-semibold px-8 py-3.5 rounded hover:bg-white/5 transition tracking-wide">
-                    ACCEDI
-                </a>
-            </div>
-        </div>
-
-        <!-- Card destra - VIDEO -->
-        <div class="relative">
-            <div class="rounded-xl overflow-hidden border border-white/10 shadow-2xl shadow-red-900/30 bg-black aspect-[16/9]">
-                <video 
-                    autoplay 
-                    muted 
-                    loop 
-                    playsinline
-                    class="w-full h-full object-contain"
-                >
-                    <source src="https://files.catbox.moe/p3bzvt.mp4" type="video/mp4">
-                </video>
-            </div>
-        </div>
-    </section>
-
-    <!-- Stats -->
-    <section class="border-y border-white/10">
-        <div class="max-w-6xl mx-auto grid grid-cols-3 text-center">
-            <div class="py-8 border-r border-white/10">
-                <div class="text-3xl font-hot text-red-pure">100%</div>
-                <div class="text-xs text-gray-500 tracking-[2px] mt-1">GRATUITO</div>
-            </div>
-            <div class="py-8 border-r border-white/10">
-                <div class="text-3xl font-hot text-red-pure">24H</div>
-                <div class="text-xs text-gray-500 tracking-[2px] mt-1">STORIE LIVE</div>
-            </div>
-            <div class="py-8">
-                <div class="text-3xl font-hot text-red-pure">GPS</div>
-                <div class="text-xs text-gray-500 tracking-[2px] mt-1">NEARBY</div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Come funziona -->
-    <section class="max-w-6xl mx-auto px-6 py-20">
-        <h2 class="text-center text-3xl font-hot tracking-wider mb-12">
-            COME <span class="text-red-pure">FUNZIONA</span>
-        </h2>
-
-        <div class="grid md:grid-cols-3 gap-6">
-            <div class="bg-white/5 border border-white/10 rounded-xl p-6 hover:border-red-500/50 transition">
-                <div class="w-12 h-12 rounded-lg bg-red-600/20 flex items-center justify-center text-red-pure text-xl mb-4">📍</div>
-                <h3 class="font-hot text-xl mb-2 tracking-wide">VICINO A TE</h3>
-                <p class="text-gray-400 text-sm leading-relaxed">
-                    Persone reali nella tua zona. Geolocalizzazione attiva per trovare chi è più vicino.
-                </p>
-            </div>
-
-            <div class="bg-white/5 border border-white/10 rounded-xl p-6 hover:border-red-500/50 transition">
-                <div class="w-12 h-12 rounded-lg bg-red-600/20 flex items-center justify-center text-red-pure text-xl mb-4">📷</div>
-                <h3 class="font-hot text-xl mb-2 tracking-wide">FOTO & STORIE</h3>
-                <p class="text-gray-400 text-sm leading-relaxed">
-                    Profili con galleria pubblica e privata. Storie che scompaiono in 24 ore.
-                </p>
-            </div>
-
-            <div class="bg-white/5 border border-white/10 rounded-xl p-6 hover:border-red-500/50 transition">
-                <div class="w-12 h-12 rounded-lg bg-red-600/20 flex items-center justify-center text-red-pure text-xl mb-4">💬</div>
-                <h3 class="font-hot text-xl mb-2 tracking-wide">MATCH & CHAT</h3>
-                <p class="text-gray-400 text-sm leading-relaxed">
-                    Swipe, match e chat privata. Vedi il profilo di chi ti piace e scriviti subito.
-                </p>
-            </div>
-        </div>
-    </section>
-
-    <!-- Footer -->
-    <footer class="border-t border-white/10 py-8 text-center text-gray-600 text-sm tracking-wide">
-        © 2026 MyCheating — Incontri reali vicino a te
-    </footer>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('/static/sw.js').catch(function () {});
+  });
+}
+</script>
 
 </body>
 </html>

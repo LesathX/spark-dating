@@ -3,7 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Foto di {{ owner.nome }} – MyCheating</title>
+  <meta name="theme-color" content="#ff0000">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="MyCheating">
+  <link rel="manifest" href="/static/manifest.json">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
+    <title>Gallery di {{ owner.nome }} – MyCheating</title>
     <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -15,20 +23,20 @@
 <body class="text-white min-h-screen pb-10">
     <div class="sticky top-0 z-20 bg-[#0a0a0a]/95 border-b border-white/10 px-4 py-3 flex items-center gap-3">
         <a href="javascript:history.back()" class="text-gray-400 text-xl">←</a>
-        <div class="font-hot text-xl tracking-wider">Foto di {{ owner.nome }}</div>
+        <div class="font-hot text-xl tracking-wider">Gallery di {{ owner.nome }}</div>
     </div>
     <div class="max-w-md mx-auto px-4 py-6">
-        <h2 class="font-hot text-lg mb-3">Pubbliche</h2>
+        <h2 class="font-hot text-lg mb-3">Pubblici</h2>
         <div class="grid grid-cols-2 gap-3 mb-8">
             {% for p in public %}
             <a href="{{ p.url }}" target="_blank" class="aspect-square rounded-xl overflow-hidden border border-white/10">
                 <img src="{{ p.url }}" class="w-full h-full object-cover" alt="">
             </a>
             {% else %}
-            <p class="text-gray-500 text-sm col-span-2">Nessuna foto pubblica</p>
+            <p class="text-gray-500 text-sm col-span-2">Nessun contenuto pubblico</p>
             {% endfor %}
         </div>
-        <h2 class="font-hot text-lg mb-3">Private 🔒</h2>
+        <h2 class="font-hot text-lg mb-3">Privati 🔒</h2>
         {% if can_private %}
         <div class="grid grid-cols-2 gap-3">
             {% for p in private %}
@@ -36,15 +44,24 @@
                 <img src="{{ p.url }}" class="w-full h-full object-cover" alt="">
             </a>
             {% else %}
-            <p class="text-gray-500 text-sm col-span-2">Nessuna foto privata</p>
+            <p class="text-gray-500 text-sm col-span-2">Nessun contenuto privato</p>
             {% endfor %}
         </div>
         {% else %}
         <div class="bg-white/5 border border-white/10 rounded-xl p-4 text-sm text-gray-400 text-center">
-            Non hai il consenso per vedere le foto private.<br>
+            Non hai il consenso per vedere le contenuti privati.<br>
             Richiedilo in chat (a pagamento, crediti non rimborsabili).
         </div>
         {% endif %}
     </div>
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('/static/sw.js').catch(function () {});
+  });
+}
+</script>
+
 </body>
 </html>

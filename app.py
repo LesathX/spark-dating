@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from fastapi import FastAPI, Request, Form, WebSocket, WebSocketDisconnect, UploadFile, File
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -158,9 +158,6 @@ SPELLS = {
     "boost": {"cost": 20, "label": "Boost profilo"},
 }
 
-
-
-
 def spend_credits(user_id, amount, motivo="", related_id=None):
     """Scala crediti e registra transazione. Ritorna True se ok (sempre bool)."""
     if amount <= 0:
@@ -311,128 +308,14 @@ def active_spell(user_id, spell_code):
     except Exception:
         return None
 
-def set_user_online(uid: int, online: bool = True):
-    """Aggiorna is_online + ultimo_accesso in modo affidabile."""
-    try:
-        c = db()
-        cur = c.cursor()
-        if online:
-            cur.execute(
-                "UPDATE users SET is_online=1, ultimo_accesso=CURRENT_TIMESTAMP WHERE id=%s",
-                (uid,),
-            )
-        else:
-            cur.execute(
-                "UPDATE users SET is_online=0, ultimo_accesso=CURRENT_TIMESTAMP WHERE id=%s",
-                (uid,),
-            )
-        c.commit()
-        cur.close()
-        c.close()
-    except Exception as e:
-        print("set_user_online:", e)
-
-
-def format_last_seen(user_row) -> str:
-    """Testo leggibile: Online / Ultimo accesso …"""
-    if not user_row:
-        return ""
-    if user_row.get("is_online"):
-        return "Online"
-    ua = user_row.get("ultimo_accesso")
-    if not ua:
-        return "Offline"
-    try:
-        from datetime import datetime, timezone
-        if hasattr(ua, "timestamp"):
-            ts = ua.replace(tzinfo=timezone.utc).timestamp() if ua.tzinfo is None else ua.timestamp()
-        else:
-            return "Offline"
-        import time
-        diff = max(0, int(time.time() - ts))
-        if diff < 60:
-            return "Ultimo accesso: ora"
-        if diff < 3600:
-            return f"Ultimo accesso: {diff // 60} min fa"
-        if diff < 86400:
-            return f"Ultimo accesso: {diff // 3600} h fa"
-        return f"Ultimo accesso: {diff // 86400} g fa"
-    except Exception:
-        return "Offline"
-
-
-def has_active_boost(user_id: int) -> bool:
-    try:
-        c = db()
-        cur = c.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS user_boosts (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                starts_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                expires_at TIMESTAMP NOT NULL
-            )
-        """)
-        c.commit()
-        cur.execute(
-            "SELECT id FROM user_boosts WHERE user_id=%s AND expires_at > NOW() LIMIT 1",
-            (user_id,),
-        )
-        ok = bool(cur.fetchone())
-        cur.close(); c.close()
-        return ok
-    except Exception as e:
-        print("has_active_boost:", e)
-        return False
-
-
 @app.websocket("/ws/{uid}")
 async def ws_endpoint(websocket: WebSocket, uid: int):
     await manager.connect(uid, websocket)
-    set_user_online(uid, True)
     try:
         while True:
-            raw = await websocket.receive_text()
-            try:
-                import json
-                data = json.loads(raw) if raw and raw[0] in "{[" else {"type": "ping"}
-            except Exception:
-                data = {"type": "ping"}
-            typ = (data.get("type") or "ping").lower()
-            if typ in ("ping", "heartbeat"):
-                set_user_online(uid, True)
-                try:
-                    await websocket.send_json({"type": "pong"})
-                except Exception:
-                    pass
-            elif typ in ("typing", "typing_start"):
-                to_uid = data.get("to_user_id")
-                conv = data.get("conversation_id")
-                if to_uid:
-                    await manager.send(int(to_uid), {
-                        "type": "typing",
-                        "from_user_id": uid,
-                        "conversation_id": conv,
-                        "active": True,
-                    })
-            elif typ in ("typing_stop", "stop_typing"):
-                to_uid = data.get("to_user_id")
-                conv = data.get("conversation_id")
-                if to_uid:
-                    await manager.send(int(to_uid), {
-                        "type": "typing",
-                        "from_user_id": uid,
-                        "conversation_id": conv,
-                        "active": False,
-                    })
-            elif typ == "presence":
-                set_user_online(uid, True)
-    except WebSocketDisconnect:
-        manager.disconnect(uid, websocket)
-        set_user_online(uid, False)
+            await websocket.receive_text()
     except Exception:
         manager.disconnect(uid, websocket)
-        set_user_online(uid, False)
 
 @app.get("/", response_class=HTMLResponse)
 async def home(req: Request):
@@ -460,17 +343,14 @@ async def reg(req: Request, email: str = Form(...), password: str = Form(...), u
     try:
         # controlli espliciti prima dell'INSERT
         cur.execute(
-            "SELECT id, username, nome FROM users WHERE lower(email)=%s LIMIT 1",
+            "SELECT id FROM users WHERE lower(email)=%s LIMIT 1",
             (email,),
         )
-        existing = cur.fetchone()
-        if existing:
-            nick = existing.get("username") or existing.get("nome") or "—"
+        if cur.fetchone():
             return templates.TemplateResponse("register.html", {
                 "request": req,
-                "error": f"Hai già un account con questa email. Nickname: @{nick}. Accedi oppure recupera la password (non possiamo mostrarti la password: è protetta).",
+                "error": "Questa email è già registrata. Accedi oppure usa «Password dimenticata».",
                 "already_registered": True,
-                "existing_username": nick,
                 "form": form_data,
             })
         cur.execute(
@@ -524,148 +404,6 @@ async def reg(req: Request, email: str = Form(...), password: str = Form(...), u
     finally:
         cur.close()
         c.close()
-
-
-@app.get("/forgot-password", response_class=HTMLResponse)
-async def forgot_password_page(req: Request):
-    return templates.TemplateResponse("forgot_password.html", {
-        "request": req, "step": "email", "error": None, "ok": None, "test_otp": None, "email": None, "username": None,
-    })
-
-
-@app.post("/forgot-password/send")
-async def forgot_password_send(req: Request, email: str = Form(...)):
-    email = (email or "").strip().lower()
-    c = db()
-    cur = c.cursor()
-    try:
-        cur.execute("SELECT id, username, nome, email FROM users WHERE lower(email)=%s AND COALESCE(is_bot,0)=0 LIMIT 1", (email,))
-        u = cur.fetchone()
-    except Exception:
-        u = None
-    if not u:
-        cur.close(); c.close()
-        # non rivelare se email esiste? qui utente sta recuperando - messaggio generico + se non esiste chiaro
-        return templates.TemplateResponse("forgot_password.html", {
-            "request": req, "step": "email",
-            "error": "Nessun account con questa email.",
-            "ok": None, "test_otp": None, "email": email, "username": None,
-        })
-    import random
-    code = f"{random.randint(0, 999999):06d}"
-    try:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS email_otps (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                email VARCHAR(200) NOT NULL,
-                code VARCHAR(10) NOT NULL,
-                expires_at TIMESTAMP NOT NULL,
-                used INTEGER DEFAULT 0,
-                phone VARCHAR(32),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        c.commit()
-    except Exception:
-        try: c.rollback()
-        except Exception: pass
-    try:
-        cur.execute(
-            """INSERT INTO email_otps (user_id, email, code, expires_at)
-               VALUES (%s,%s,%s, NOW() + interval '15 minutes')""",
-            (u["id"], email, code),
-        )
-        c.commit()
-    except Exception as e:
-        print("forgot otp:", e)
-        try: c.rollback()
-        except Exception: pass
-    cur.close(); c.close()
-    sent = send_otp_email(email, code)
-    try:
-        req.session["reset_user_id"] = u["id"]
-        req.session["reset_email"] = email
-        if not sent:
-            req.session["reset_test_otp"] = code
-        else:
-            req.session.pop("reset_test_otp", None)
-    except Exception:
-        pass
-    return templates.TemplateResponse("forgot_password.html", {
-        "request": req, "step": "otp",
-        "error": None,
-        "ok": "Codice inviato" if sent else None,
-        "test_otp": None if sent else code,
-        "email": email,
-        "username": u.get("username"),
-    })
-
-
-@app.post("/forgot-password/reset")
-async def forgot_password_reset(req: Request, otp: str = Form(...), password: str = Form(...), password2: str = Form(...)):
-    email = (req.session.get("reset_email") or "").strip().lower()
-    uid = req.session.get("reset_user_id")
-    if not email or not uid:
-        return RedirectResponse("/forgot-password", 303)
-    if (password or "") != (password2 or ""):
-        return templates.TemplateResponse("forgot_password.html", {
-            "request": req, "step": "otp", "error": "Le password non coincidono",
-            "ok": None, "test_otp": req.session.get("reset_test_otp"), "email": email,
-            "username": None,
-        })
-    if len(password or "") < 6:
-        return templates.TemplateResponse("forgot_password.html", {
-            "request": req, "step": "otp", "error": "Password minimo 6 caratteri",
-            "ok": None, "test_otp": req.session.get("reset_test_otp"), "email": email,
-            "username": None,
-        })
-    code = "".join(ch for ch in otp if ch.isdigit())
-    c = db()
-    cur = c.cursor()
-    try:
-        cur.execute(
-            """SELECT id FROM email_otps WHERE user_id=%s AND email=%s AND code=%s AND used=0 AND expires_at > NOW()
-               ORDER BY id DESC LIMIT 1""",
-            (uid, email, code),
-        )
-        row = cur.fetchone()
-        if not row:
-            cur.close(); c.close()
-            return templates.TemplateResponse("forgot_password.html", {
-                "request": req, "step": "otp", "error": "Codice errato o scaduto",
-                "ok": None, "test_otp": req.session.get("reset_test_otp"), "email": email,
-                "username": None,
-            })
-        cur.execute("UPDATE email_otps SET used=1 WHERE id=%s", (row["id"],))
-        cur.execute("UPDATE users SET password_hash=%s WHERE id=%s", (hash_pw(password), uid))
-        # recupera nick
-        cur.execute("SELECT username FROM users WHERE id=%s", (uid,))
-        u = cur.fetchone()
-        c.commit()
-    except Exception as e:
-        print("reset pw:", e)
-        try: c.rollback()
-        except Exception: pass
-        cur.close(); c.close()
-        return templates.TemplateResponse("forgot_password.html", {
-            "request": req, "step": "otp", "error": "Errore reset", "ok": None,
-            "test_otp": None, "email": email, "username": None,
-        })
-    cur.close(); c.close()
-    try:
-        req.session.pop("reset_user_id", None)
-        req.session.pop("reset_email", None)
-        req.session.pop("reset_test_otp", None)
-    except Exception:
-        pass
-    return templates.TemplateResponse("forgot_password.html", {
-        "request": req, "step": "done",
-        "error": None, "ok": "Password aggiornata",
-        "test_otp": None, "email": email,
-        "username": (u or {}).get("username"),
-    })
-
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(req: Request):
@@ -833,12 +571,7 @@ async def discover(req: Request):
                   AND u.id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = %s)
                   AND u.id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = %s)
                   {online_sql}
-                ORDER BY (
-                    CASE WHEN EXISTS (
-                        SELECT 1 FROM user_boosts ub
-                        WHERE ub.user_id = u.id AND ub.expires_at > NOW()
-                    ) THEN 0 ELSE 1 END
-                ), RANDOM() LIMIT 1
+                ORDER BY RANDOM() LIMIT 1
             """, (user["id"], user["id"], user["id"], user["id"]))
             cand = cur.fetchone()
     else:
@@ -850,12 +583,7 @@ async def discover(req: Request):
               AND u.id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = %s)
               AND u.id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = %s)
               {online_sql}
-            ORDER BY (
-                    CASE WHEN EXISTS (
-                        SELECT 1 FROM user_boosts ub
-                        WHERE ub.user_id = u.id AND ub.expires_at > NOW()
-                    ) THEN 0 ELSE 1 END
-                ), RANDOM() LIMIT 1
+            ORDER BY RANDOM() LIMIT 1
         """, (user["id"], user["id"], user["id"], user["id"]))
         cand = cur.fetchone()
 
@@ -1254,8 +982,7 @@ async def chat_page(req: Request, conversation_id: int):
         try:
             try:
                 cur.execute(
-                    """SELECT id, conversation_id, sender_id, contenuto, data_invio, media_url, media_type, expires_at,
-                          COALESCE(reply_to_id, NULL) as reply_to_id, COALESCE(letto,0) as letto
+                    """SELECT id, conversation_id, sender_id, contenuto, data_invio, media_url, media_type, expires_at
                        FROM messages WHERE conversation_id=%s
                          AND (expires_at IS NULL OR expires_at > NOW() - interval '2 seconds')
                        ORDER BY id ASC LIMIT 500""",
@@ -1342,45 +1069,6 @@ async def chat_page(req: Request, conversation_id: int):
             except Exception:
                 pass
 
-        # 4b) reazioni + reply preview
-        try:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS message_reactions (
-                    id SERIAL PRIMARY KEY,
-                    message_id INTEGER NOT NULL,
-                    user_id INTEGER NOT NULL,
-                    emoji VARCHAR(16) NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(message_id, user_id)
-                )
-            """)
-            c.commit()
-        except Exception:
-            try: c.rollback()
-            except Exception: pass
-        try:
-            ids = [m["id"] for m in messaggi if m.get("id")]
-            reactions_map = {}
-            if ids:
-                cur.execute(
-                    "SELECT message_id, emoji, user_id FROM message_reactions WHERE message_id = ANY(%s)",
-                    (ids,),
-                )
-                for r in cur.fetchall():
-                    reactions_map.setdefault(r["message_id"], []).append(dict(r))
-            by_id = {m["id"]: m for m in messaggi if m.get("id")}
-            for m in messaggi:
-                m["reactions"] = reactions_map.get(m["id"], [])
-                rid = m.get("reply_to_id")
-                if rid and rid in by_id:
-                    m["reply_preview"] = (by_id[rid].get("contenuto") or "media")[:80]
-                else:
-                    m["reply_preview"] = None
-        except Exception as e:
-            print("reactions load:", e)
-            try: c.rollback()
-            except Exception: pass
-
         # 5) photo access (optional)
         try:
             cur.execute(
@@ -1424,35 +1112,6 @@ async def chat_page(req: Request, conversation_id: int):
         ur = 0
 
     try:
-        icebreakers = [
-            "Ciao! Come va oggi? 😊",
-            "Cosa ti ha portato su MyCheating?",
-            "Film o serie preferita?",
-            "Aperitivo o cena?",
-            "Qual è il tuo posto preferito in città?",
-        ]
-        # stale online: se ultimo_accesso > 2 min → offline
-        try:
-            c2 = db()
-            cur2 = c2.cursor()
-            cur2.execute(
-                """UPDATE users SET is_online=0
-                   WHERE id=%s AND is_online=1
-                     AND ultimo_accesso IS NOT NULL
-                     AND ultimo_accesso < NOW() - interval '2 minutes'""",
-                (altro.get("id"),),
-            )
-            c2.commit()
-            cur2.execute("SELECT is_online, ultimo_accesso FROM users WHERE id=%s", (altro.get("id"),))
-            row2 = cur2.fetchone()
-            if row2:
-                altro["is_online"] = row2.get("is_online")
-                altro["ultimo_accesso"] = row2.get("ultimo_accesso")
-            cur2.close(); c2.close()
-        except Exception:
-            pass
-        last_seen = format_last_seen(altro)
-
         return templates.TemplateResponse("chat.html", {
             "request": req,
             "user": user,
@@ -1463,9 +1122,6 @@ async def chat_page(req: Request, conversation_id: int):
             "photo_access": photo_access,
             "pending_request": pending_request,
             "photo_cost": 25,
-            "icebreakers": icebreakers,
-            "last_seen": last_seen,
-            "stickers": STICKERS,
         })
     except Exception as e:
         print("chat template error:", type(e).__name__, e)
@@ -1840,133 +1496,6 @@ async def chat_block(req: Request, conversation_id: int):
         cur.close()
         c.close()
     return RedirectResponse("/chats?blocked=1", 303)
-
-
-
-@app.post("/chat/{conversation_id}/reply")
-async def chat_reply(req: Request, conversation_id: int, reply_to_id: int = Form(...), contenuto: str = Form(...)):
-    """Rispondi a un messaggio specifico (stile IG/WA)."""
-    user = current_user(req)
-    if not user:
-        return RedirectResponse("/login", 303)
-    contenuto = (contenuto or "").strip()
-    if not contenuto:
-        return RedirectResponse(f"/chat/{conversation_id}", 303)
-    c = db()
-    cur = c.cursor()
-    try:
-        cur.execute("""SELECT c.id, m.user1_id, m.user2_id FROM conversations c
-               JOIN matches m ON m.id = c.match_id WHERE c.id=%s""", (conversation_id,))
-        conv = cur.fetchone()
-        if not conv or user["id"] not in (conv["user1_id"], conv["user2_id"]):
-            cur.close(); c.close()
-            return RedirectResponse("/chats", 303)
-        try:
-            cur.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id INTEGER")
-            c.commit()
-        except Exception:
-            try: c.rollback()
-            except Exception: pass
-        cur.execute(
-            """INSERT INTO messages (conversation_id, sender_id, tipo, contenuto, reply_to_id)
-               VALUES (%s,%s,'testo',%s,%s)""",
-            (conversation_id, user["id"], contenuto[:2000], reply_to_id),
-        )
-        try:
-            cur.execute("UPDATE conversations SET ultimo_messaggio_at=CURRENT_TIMESTAMP WHERE id=%s", (conversation_id,))
-        except Exception:
-            pass
-        altro = conv["user2_id"] if user["id"] == conv["user1_id"] else conv["user1_id"]
-        try:
-            cur.execute(
-                "INSERT INTO notifications (user_id,tipo,titolo,contenuto,related_id) VALUES (%s,'nuovo_messaggio',%s,%s,%s)",
-                (altro, f"Risposta da {user.get('nome') or 'utente'}", contenuto[:80], conversation_id),
-            )
-        except Exception:
-            pass
-        c.commit()
-    except Exception as e:
-        print("chat reply:", e)
-        try: c.rollback()
-        except Exception: pass
-    cur.close(); c.close()
-    return RedirectResponse(f"/chat/{conversation_id}", 303)
-
-
-@app.post("/chat/{conversation_id}/react/{message_id}")
-async def chat_react(req: Request, conversation_id: int, message_id: int, emoji: str = Form("❤️")):
-    """Reazione emoji a un messaggio (stile IG/FB)."""
-    user = current_user(req)
-    if not user:
-        return RedirectResponse("/login", 303)
-    emoji = (emoji or "❤️")[:8]
-    c = db()
-    cur = c.cursor()
-    try:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS message_reactions (
-                id SERIAL PRIMARY KEY,
-                message_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                emoji VARCHAR(16) NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(message_id, user_id)
-            )
-        """)
-        c.commit()
-    except Exception:
-        try: c.rollback()
-        except Exception: pass
-    try:
-        cur.execute(
-            """INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (%s,%s,%s)
-               ON CONFLICT (message_id, user_id) DO UPDATE SET emoji=EXCLUDED.emoji""",
-            (message_id, user["id"], emoji),
-        )
-        c.commit()
-    except Exception as e:
-        print("react:", e)
-        try:
-            c.rollback()
-            cur.execute("DELETE FROM message_reactions WHERE message_id=%s AND user_id=%s", (message_id, user["id"]))
-            cur.execute(
-                "INSERT INTO message_reactions (message_id, user_id, emoji) VALUES (%s,%s,%s)",
-                (message_id, user["id"], emoji),
-            )
-            c.commit()
-        except Exception as e2:
-            print("react2:", e2)
-            try: c.rollback()
-            except Exception: pass
-    cur.close(); c.close()
-    return RedirectResponse(f"/chat/{conversation_id}", 303)
-
-
-@app.post("/chat/{conversation_id}/unmatch")
-async def chat_unmatch(req: Request, conversation_id: int):
-    """Togli match e chiudi chat (stile Tinder)."""
-    user = current_user(req)
-    if not user:
-        return RedirectResponse("/login", 303)
-    c = db()
-    cur = c.cursor()
-    try:
-        cur.execute("""SELECT c.id, c.match_id, m.user1_id, m.user2_id FROM conversations c
-               JOIN matches m ON m.id = c.match_id WHERE c.id=%s""", (conversation_id,))
-        conv = cur.fetchone()
-        if not conv or user["id"] not in (conv["user1_id"], conv["user2_id"]):
-            cur.close(); c.close()
-            return RedirectResponse("/chats", 303)
-        mid = conv.get("match_id")
-        if mid:
-            cur.execute("UPDATE matches SET attivo=0 WHERE id=%s", (mid,))
-        c.commit()
-    except Exception as e:
-        print("unmatch:", e)
-        try: c.rollback()
-        except Exception: pass
-    cur.close(); c.close()
-    return RedirectResponse("/chats?unmatched=1", 303)
 
 
 @app.post("/chat/{conversation_id}/report")
@@ -2425,100 +1954,44 @@ def _send_sms_otp(phone_e164: str, code: str) -> tuple:
 
 
 
-_last_smtp_error = None
-
 def send_otp_email(to_email: str, code: str, phone: str = None) -> bool:
-    """Invia OTP via SMTP. Gestisce cert SSL non validi (hosting condivisi)."""
-    global _last_smtp_error
-    _last_smtp_error = None
-    import os, smtplib, ssl
+    """Invia OTP via SMTP. Supporta porta 587 (STARTTLS) e 465 (SSL)."""
+    import os, smtplib
     from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
-
-    host = (os.environ.get("SMTP_HOST") or "").strip()
-    user = (os.environ.get("SMTP_USER") or "").strip()
-    password = (os.environ.get("SMTP_PASS") or "").strip()
-    try:
-        port = int((os.environ.get("SMTP_PORT") or "465").strip() or "465")
-    except Exception:
-        port = 465
-    from_addr = (os.environ.get("SMTP_FROM") or user or "admin@mycheating.it").strip()
-    verify_ssl = (os.environ.get("SMTP_SSL_VERIFY") or "0").strip().lower() in ("1", "true", "yes")
-
-    print(f"[SMTP] host={host!r} port={port} user={user!r} from={from_addr!r} to={to_email!r} pass_set={bool(password)} pass_len={len(password)} ssl_verify={verify_ssl}")
-
+    host = os.environ.get("SMTP_HOST", "").strip()
+    user = os.environ.get("SMTP_USER", "").strip()
+    password = os.environ.get("SMTP_PASS", "").strip()
+    port = int(os.environ.get("SMTP_PORT", "587") or 587)
+    from_addr = os.environ.get("SMTP_FROM", user or "noreply@mycheating.it")
     if not (host and user and password and to_email):
-        _last_smtp_error = "missing SMTP_HOST/USER/PASS or recipient"
-        print(f"[EMAIL OTP TEST] missing config — code={code} to={to_email}")
+        print(f"[EMAIL OTP TEST] {to_email} phone={phone} code={code}")
         return False
-
     body = f"MyCheating – codice di verifica: {code}\nValido 10 minuti.\n"
     if phone:
         body += f"Numero collegato (visibile solo a te): {phone}\n"
-    body += "\nSe non hai richiesto questo codice, ignora pure questa email.\n"
-
-    msg = MIMEMultipart()
+    msg = MIMEText(body)
     msg["Subject"] = "Codice verifica MyCheating"
     msg["From"] = from_addr
     msg["To"] = to_email
-    msg.attach(MIMEText(body, "plain", "utf-8"))
-    raw = msg.as_string()
-
-    ctx_secure = ssl.create_default_context()
-    ctx_insecure = ssl._create_unverified_context()
-
-    def try_ssl(p, ctx):
-        with smtplib.SMTP_SSL(host, p, timeout=30, context=ctx) as s:
-            s.login(user, password)
-            refused = s.sendmail(from_addr, [to_email], raw)
-            if refused:
-                raise RuntimeError(f"sendmail refused: {refused}")
-
-    def try_starttls(p, ctx):
-        with smtplib.SMTP(host, p, timeout=30) as s:
-            s.ehlo()
-            s.starttls(context=ctx)
-            s.ehlo()
-            s.login(user, password)
-            refused = s.sendmail(from_addr, [to_email], raw)
-            if refused:
-                raise RuntimeError(f"sendmail refused: {refused}")
-
-    attempts = []
-    contexts = []
-    if verify_ssl:
-        contexts.append(ctx_secure)
-    contexts.append(ctx_insecure)
-
-    for ctx in contexts:
-        tag = "verify" if ctx is ctx_secure else "no-verify"
-        if port == 587:
-            attempts += [(try_starttls, 587, ctx, tag), (try_ssl, 465, ctx, tag)]
+    try:
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port, timeout=25) as s:
+                s.login(user, password)
+                s.sendmail(from_addr, [to_email], msg.as_string())
         else:
-            attempts += [(try_ssl, 465 if port in (465, 0) else port, ctx, tag), (try_starttls, 587, ctx, tag)]
+            with smtplib.SMTP(host, port, timeout=25) as s:
+                s.ehlo()
+                s.starttls()
+                s.ehlo()
+                s.login(user, password)
+                s.sendmail(from_addr, [to_email], msg.as_string())
+        print(f"[EMAIL OTP OK] sent to {to_email}")
+        return True
+    except Exception as e:
+        print("smtp send:", e)
+        print(f"[EMAIL OTP TEST fallback] {to_email} code={code}")
+        return False
 
-    errors = []
-    seen = set()
-    for fn, p, ctx, tag in attempts:
-        key = (fn.__name__, p, tag)
-        if key in seen:
-            continue
-        seen.add(key)
-        try:
-            print(f"[SMTP] trying {fn.__name__} port={p} ssl={tag}…")
-            fn(p, ctx)
-            print(f"[EMAIL OTP OK] sent to {to_email} via {fn.__name__}:{p} ({tag})")
-            _last_smtp_error = None
-            return True
-        except Exception as e:
-            err = f"{fn.__name__}:{p}:{tag} -> {type(e).__name__}: {e}"
-            print("[SMTP] fail", err)
-            errors.append(err)
-
-    _last_smtp_error = " | ".join(errors) if errors else "unknown"
-    print("[SMTP] all attempts failed:", _last_smtp_error)
-    print(f"[EMAIL OTP TEST fallback] {to_email} code={code}")
-    return False
 
 
 @app.get("/verify-phone", response_class=HTMLResponse)
@@ -4992,42 +4465,6 @@ async def storage_signed_url(path: str, expires_sec: int = 3600) -> str:
     return f"{SUPABASE_URL}/storage/v1{signed}"
 
 
-
-@app.get("/admin/smtp-test")
-async def admin_smtp_test(req: Request):
-    """Test invio email OTP (solo admin). Apri: /admin/smtp-test?to=tua@email.com"""
-    admin = require_admin(req)
-    if not admin:
-        return RedirectResponse("/login", 303)
-    import os, json
-    to = (req.query_params.get("to") or admin.get("email") or "").strip()
-    host = (os.environ.get("SMTP_HOST") or "").strip()
-    user = (os.environ.get("SMTP_USER") or "").strip()
-    password = (os.environ.get("SMTP_PASS") or "").strip()
-    port = (os.environ.get("SMTP_PORT") or "").strip()
-    frm = (os.environ.get("SMTP_FROM") or "").strip()
-    info = {
-        "SMTP_HOST": host or None,
-        "SMTP_PORT": port or None,
-        "SMTP_USER": user or None,
-        "SMTP_FROM": frm or None,
-        "SMTP_PASS_set": bool(password),
-        "SMTP_PASS_len": len(password) if password else 0,
-        "to": to,
-    }
-    if not to:
-        return JSONResponse({**info, "ok": False, "error": "passa ?to=email@dominio.com"})
-    code = "123456"
-    ok = send_otp_email(to, code, phone="+390000000000")
-    return JSONResponse({
-        **info,
-        "ok": ok,
-        "error": _last_smtp_error,
-        "code_version": "smtp-ssl-novverify-2",
-        "note": "Se ok=false guarda error. Se ok=true controlla inbox+spam di " + to,
-    })
-
-
 @app.get("/admin/storage-test")
 async def admin_storage_test(req: Request):
     """Test Storage senza httpx. Solo admin."""
@@ -5488,290 +4925,6 @@ async def photos_view(req: Request, owner_id: int):
 
 
 # ============== INCANTESIMI ==============
-
-# ===================== STORIE 24h =====================
-@app.get("/stories", response_class=HTMLResponse)
-async def stories_feed(req: Request):
-    user = current_user(req)
-    if not user:
-        return RedirectResponse("/login", 303)
-    c = db()
-    cur = c.cursor()
-    try:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS stories (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                media_url TEXT NOT NULL,
-                media_type VARCHAR(20) DEFAULT 'image',
-                caption TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                expires_at TIMESTAMP NOT NULL
-            )
-        """)
-        c.commit()
-    except Exception:
-        try: c.rollback()
-        except Exception: pass
-    # storie attive raggruppate per utente (escludi scadute)
-    try:
-        cur.execute("""
-            SELECT s.*, u.nome, u.username, u.foto_principale_url
-            FROM stories s
-            JOIN users u ON u.id = s.user_id
-            WHERE s.expires_at > NOW()
-              AND COALESCE(u.is_bot,0)=0
-              AND u.stato='attivo'
-              AND s.user_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id=%s)
-              AND s.user_id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id=%s)
-            ORDER BY s.created_at DESC
-            LIMIT 100
-        """, (user["id"], user["id"]))
-        rows = [dict(r) for r in cur.fetchall()]
-    except Exception as e:
-        print("stories feed:", e)
-        rows = []
-    # raggruppa
-    by_user = {}
-    for r in rows:
-        by_user.setdefault(r["user_id"], {"user": r, "items": []})["items"].append(r)
-    groups = list(by_user.values())
-    # mie storie
-    try:
-        cur.execute(
-            "SELECT * FROM stories WHERE user_id=%s AND expires_at > NOW() ORDER BY created_at DESC",
-            (user["id"],),
-        )
-        my_stories = [dict(r) for r in cur.fetchall()]
-    except Exception:
-        my_stories = []
-    cur.close(); c.close()
-    return templates.TemplateResponse("stories.html", {
-        "request": req, "user": user, "groups": groups, "my_stories": my_stories,
-        "unread": unread_count(user["id"]),
-    })
-
-
-@app.post("/stories/create")
-async def stories_create(req: Request, caption: str = Form(""), file: UploadFile = File(None)):
-    user = current_user(req)
-    if not user:
-        return RedirectResponse("/login", 303)
-    if not file or not file.filename:
-        return RedirectResponse("/stories?err=file", 303)
-    data = await file.read()
-    if not data or len(data) > MAX_UPLOAD_BYTES:
-        return RedirectResponse("/stories?err=size", 303)
-    import uuid
-    ext = (file.filename.rsplit(".", 1)[-1] if "." in file.filename else "jpg").lower()
-    is_video = ext in ("mp4", "webm", "mov")
-    media_type = "video" if is_video else "image"
-    path = f"stories/{user['id']}/{uuid.uuid4().hex}.{ext}"
-    # upload gallery bucket
-    url = None
-    try:
-        # reuse storage upload if exists
-        from urllib.request import Request as UrlReq, urlopen
-        import os
-        key = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_KEY") or ""
-        base = os.environ.get("SUPABASE_URL", SUPABASE_URL).rstrip("/")
-        bucket = os.environ.get("STORAGE_BUCKET", STORAGE_BUCKET)
-        if key and base:
-            upload_url = f"{base}/storage/v1/object/{bucket}/{path}"
-            req_u = UrlReq(upload_url, data=data, method="POST")
-            req_u.add_header("Authorization", f"Bearer {key}")
-            req_u.add_header("Content-Type", file.content_type or "application/octet-stream")
-            req_u.add_header("x-upsert", "true")
-            with urlopen(req_u, timeout=60) as resp:
-                if resp.status in (200, 201):
-                    url = f"{base}/storage/v1/object/public/{bucket}/{path}"
-    except Exception as e:
-        print("story upload:", e)
-    if not url:
-        # local fallback
-        dest = BASE_DIR / "static" / "uploads" / "stories" / str(user["id"])
-        dest.mkdir(parents=True, exist_ok=True)
-        fname = f"{uuid.uuid4().hex}.{ext}"
-        (dest / fname).write_bytes(data)
-        url = f"/static/uploads/stories/{user['id']}/{fname}"
-    c = db()
-    cur = c.cursor()
-    try:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS stories (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                media_url TEXT NOT NULL,
-                media_type VARCHAR(20) DEFAULT 'image',
-                caption TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                expires_at TIMESTAMP NOT NULL
-            )
-        """)
-        cur.execute(
-            """INSERT INTO stories (user_id, media_url, media_type, caption, expires_at)
-               VALUES (%s,%s,%s,%s, NOW() + interval '24 hours')""",
-            (user["id"], url, media_type, (caption or "")[:200]),
-        )
-        c.commit()
-    except Exception as e:
-        print("story insert:", e)
-        try: c.rollback()
-        except Exception: pass
-    cur.close(); c.close()
-    return RedirectResponse("/stories?ok=1", 303)
-
-
-@app.post("/stories/delete/{story_id}")
-async def stories_delete(req: Request, story_id: int):
-    user = current_user(req)
-    if not user:
-        return RedirectResponse("/login", 303)
-    c = db()
-    cur = c.cursor()
-    try:
-        cur.execute("DELETE FROM stories WHERE id=%s AND user_id=%s", (story_id, user["id"]))
-        c.commit()
-    except Exception:
-        try: c.rollback()
-        except Exception: pass
-    cur.close(); c.close()
-    return RedirectResponse("/stories", 303)
-
-
-# ===================== GIF / STICKERS in chat =====================
-STICKERS = [
-    {"id": "🔥", "label": "Fuoco"},
-    {"id": "❤️", "label": "Cuore"},
-    {"id": "😍", "label": "Innamorato"},
-    {"id": "😂", "label": "Lol"},
-    {"id": "💋", "label": "Bacio"},
-    {"id": "😈", "label": "Diavolo"},
-    {"id": "🍑", "label": "Pesca"},
-    {"id": "👀", "label": "Occhi"},
-    {"id": "🙌", "label": "Hands"},
-    {"id": "✨", "label": "Sparkle"},
-    {"id": "🥵", "label": "Hot"},
-    {"id": "🌹", "label": "Rosa"},
-]
-
-
-@app.post("/chat/{conversation_id}/sticker")
-async def chat_sticker(req: Request, conversation_id: int, sticker: str = Form(...)):
-    user = current_user(req)
-    if not user:
-        return RedirectResponse("/login", 303)
-    sticker = (sticker or "")[:16]
-    if not sticker:
-        return RedirectResponse(f"/chat/{conversation_id}", 303)
-    c = db()
-    cur = c.cursor()
-    try:
-        cur.execute("""SELECT c.id, m.user1_id, m.user2_id FROM conversations c
-               JOIN matches m ON m.id = c.match_id WHERE c.id=%s""", (conversation_id,))
-        conv = cur.fetchone()
-        if not conv or user["id"] not in (conv["user1_id"], conv["user2_id"]):
-            cur.close(); c.close()
-            return RedirectResponse("/chats", 303)
-        cur.execute(
-            "INSERT INTO messages (conversation_id,sender_id,tipo,contenuto) VALUES (%s,%s,'sticker',%s)",
-            (conversation_id, user["id"], sticker),
-        )
-        try:
-            cur.execute("UPDATE conversations SET ultimo_messaggio_at=CURRENT_TIMESTAMP WHERE id=%s", (conversation_id,))
-        except Exception:
-            pass
-        altro = conv["user2_id"] if user["id"] == conv["user1_id"] else conv["user1_id"]
-        try:
-            cur.execute(
-                "INSERT INTO notifications (user_id,tipo,titolo,contenuto,related_id) VALUES (%s,'nuovo_messaggio',%s,%s,%s)",
-                (altro, f"Sticker da {user.get('nome') or 'utente'}", sticker, conversation_id),
-            )
-        except Exception:
-            pass
-        c.commit()
-        try:
-            await manager.send(altro, {"type": "nuovo_messaggio", "conversation_id": conversation_id, "preview": sticker})
-        except Exception:
-            pass
-    except Exception as e:
-        print("sticker:", e)
-        try: c.rollback()
-        except Exception: pass
-    cur.close(); c.close()
-    return RedirectResponse(f"/chat/{conversation_id}", 303)
-
-
-@app.post("/chat/{conversation_id}/gif")
-async def chat_gif(req: Request, conversation_id: int, gif_url: str = Form(...)):
-    """Invia GIF da URL (Giphy o altro)."""
-    user = current_user(req)
-    if not user:
-        return RedirectResponse("/login", 303)
-    gif_url = (gif_url or "").strip()
-    if not gif_url.startswith("http"):
-        return RedirectResponse(f"/chat/{conversation_id}", 303)
-    c = db()
-    cur = c.cursor()
-    try:
-        cur.execute("""SELECT c.id, m.user1_id, m.user2_id FROM conversations c
-               JOIN matches m ON m.id = c.match_id WHERE c.id=%s""", (conversation_id,))
-        conv = cur.fetchone()
-        if not conv or user["id"] not in (conv["user1_id"], conv["user2_id"]):
-            cur.close(); c.close()
-            return RedirectResponse("/chats", 303)
-        try:
-            cur.execute(
-                """INSERT INTO messages (conversation_id,sender_id,tipo,contenuto,media_url,media_type)
-                   VALUES (%s,%s,'gif','GIF',%s,'gif')""",
-                (conversation_id, user["id"], gif_url[:500]),
-            )
-        except Exception:
-            c.rollback()
-            cur.execute(
-                "INSERT INTO messages (conversation_id,sender_id,tipo,contenuto) VALUES (%s,%s,'gif',%s)",
-                (conversation_id, user["id"], gif_url[:500]),
-            )
-        c.commit()
-        altro = conv["user2_id"] if user["id"] == conv["user1_id"] else conv["user1_id"]
-        try:
-            await manager.send(altro, {"type": "nuovo_messaggio", "conversation_id": conversation_id, "preview": "GIF"})
-        except Exception:
-            pass
-    except Exception as e:
-        print("gif:", e)
-        try: c.rollback()
-        except Exception: pass
-    cur.close(); c.close()
-    return RedirectResponse(f"/chat/{conversation_id}", 303)
-
-
-@app.get("/api/giphy")
-async def api_giphy(req: Request, q: str = "funny"):
-    """Proxy Giphy se GIPHY_API_KEY è settata, altrimenti sticker pack."""
-    import os, json
-    from urllib.request import urlopen, quote
-    key = (os.environ.get("GIPHY_API_KEY") or "").strip()
-    if not key:
-        return JSONResponse({"ok": True, "source": "stickers", "items": [
-            {"id": s["id"], "url": None, "label": s["label"]} for s in STICKERS
-        ]})
-    try:
-        url = f"https://api.giphy.com/v1/gifs/search?api_key={key}&q={quote(q)}&limit=20&rating=pg-13"
-        with urlopen(url, timeout=10) as resp:
-            data = json.loads(resp.read().decode())
-        items = []
-        for g in data.get("data") or []:
-            imgs = g.get("images") or {}
-            u = (imgs.get("fixed_height") or imgs.get("downsized") or {}).get("url")
-            if u:
-                items.append({"id": g.get("id"), "url": u, "label": g.get("title") or "GIF"})
-        return JSONResponse({"ok": True, "source": "giphy", "items": items})
-    except Exception as e:
-        print("giphy:", e)
-        return JSONResponse({"ok": False, "error": str(e), "items": []})
-
-
 @app.get("/spells", response_class=HTMLResponse)
 async def spells_page(req: Request):
     user = current_user(req)
@@ -5810,32 +4963,19 @@ async def spells_cast(req: Request, spell: str = Form(...)):
     if spell == "boost":
         if not spend_credits(user["id"], cost, "boost"):
             return RedirectResponse("/spells?err=crediti", 303)
+        # semplice: segna notification
         try:
             c = db()
             cur = c.cursor()
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS user_boosts (
-                    id SERIAL PRIMARY KEY,
-                    user_id INTEGER NOT NULL,
-                    starts_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    expires_at TIMESTAMP NOT NULL
-                )
-            """)
-            # 30 minuti di boost
             cur.execute(
-                """INSERT INTO user_boosts (user_id, expires_at)
-                   VALUES (%s, NOW() + interval '30 minutes')""",
-                (user["id"],),
-            )
-            cur.execute(
-                "INSERT INTO notifications (user_id,tipo,titolo,contenuto) VALUES (%s,'boost','Boost attivo','Il tuo profilo e in evidenza per 30 minuti!')",
+                "INSERT INTO notifications (user_id,tipo,titolo,contenuto) VALUES (%s,'boost','Boost attivo','Il tuo profilo e in evidenza!')",
                 (user["id"],),
             )
             c.commit()
             cur.close()
             c.close()
-        except Exception as e:
-            print("boost activate:", e)
+        except Exception:
+            pass
         return RedirectResponse("/spells?ok=boost", 303)
     return RedirectResponse("/spells", 303)
 

@@ -62,6 +62,7 @@
                     <th class="px-4 py-3 font-normal">RUOLO</th>
                     <th class="px-4 py-3 font-normal">ETÀ</th>
                     <th class="px-4 py-3 font-normal">CITTÀ</th>
+                    <th class="px-4 py-3 font-normal">POSIZIONE</th>
                     <th class="px-4 py-3 font-normal">RESTRIZIONI</th>
                     <th class="px-4 py-3 font-normal">AZIONI</th>
                 </tr>
@@ -96,6 +97,17 @@
                     </td>
                     <td class="px-4 py-3 text-gray-400">{{ u.eta if u.eta else '—' }}</td>
                     <td class="px-4 py-3 text-gray-400">{{ u.citta or '—' }}</td>
+                    <td class="px-4 py-3 text-xs">
+                        {% if u.latitude and u.longitude %}
+                        <a href="https://www.google.com/maps?q={{ u.latitude }},{{ u.longitude }}" target="_blank" rel="noopener"
+                           class="text-[#ff0000] hover:underline" title="{{ u.latitude }}, {{ u.longitude }}">
+                            📍 Mappa
+                        </a>
+                        <div class="text-[10px] text-gray-600 mt-0.5">{{ u.latitude }}, {{ u.longitude }}</div>
+                        {% else %}
+                        <span class="text-gray-600">—</span>
+                        {% endif %}
+                    </td>
                     <td class="px-4 py-3 text-gray-500 text-xs">
                         {% set rc = namespace(n=0) %}
                         {% if u.restrictions %}
@@ -120,7 +132,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="8" class="px-4 py-10 text-center text-gray-500">Nessun utente</td></tr>
+                <tr><td colspan="9" class="px-4 py-10 text-center text-gray-500">Nessun utente</td></tr>
                 {% endfor %}
             </tbody>
         </table>

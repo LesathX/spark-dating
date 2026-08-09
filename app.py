@@ -1955,43 +1955,82 @@ def _send_sms_otp(phone_e164: str, code: str) -> tuple:
 
 
 def send_otp_email(to_email: str, code: str, phone: str = None) -> bool:
-    """Invia OTP via SMTP. Supporta porta 587 (STARTTLS) e 465 (SSL)."""
-    import os, smtplib
+    """Invia OTP via SMTP. Prova 465 SSL e, se fallisce, 587 STARTTLS."""
+    import os, smtplib, ssl
     from email.mime.text import MIMEText
-    host = os.environ.get("SMTP_HOST", "").strip()
-    user = os.environ.get("SMTP_USER", "").strip()
-    password = os.environ.get("SMTP_PASS", "").strip()
-    port = int(os.environ.get("SMTP_PORT", "587") or 587)
-    from_addr = os.environ.get("SMTP_FROM", user or "noreply@mycheating.it")
+    from email.mime.multipart import MIMEMultipart
+
+    host = (os.environ.get("SMTP_HOST") or "").strip()
+    user = (os.environ.get("SMTP_USER") or "").strip()
+    password = (os.environ.get("SMTP_PASS") or "").strip()
+    try:
+        port = int((os.environ.get("SMTP_PORT") or "465").strip() or "465")
+    except Exception:
+        port = 465
+    from_addr = (os.environ.get("SMTP_FROM") or user or "admin@mycheating.it").strip()
+
+    print(f"[SMTP] host={host!r} port={port} user={user!r} from={from_addr!r} to={to_email!r} pass_set={bool(password)}")
+
     if not (host and user and password and to_email):
-        print(f"[EMAIL OTP TEST] {to_email} phone={phone} code={code}")
+        print(f"[EMAIL OTP TEST] missing config — code={code} to={to_email}")
         return False
+
     body = f"MyCheating – codice di verifica: {code}\nValido 10 minuti.\n"
     if phone:
         body += f"Numero collegato (visibile solo a te): {phone}\n"
-    msg = MIMEText(body)
+    body += "\nSe non hai richiesto questo codice, ignora pure questa email.\n"
+
+    msg = MIMEMultipart()
     msg["Subject"] = "Codice verifica MyCheating"
     msg["From"] = from_addr
     msg["To"] = to_email
-    try:
-        if port == 465:
-            with smtplib.SMTP_SSL(host, port, timeout=25) as s:
-                s.login(user, password)
-                s.sendmail(from_addr, [to_email], msg.as_string())
-        else:
-            with smtplib.SMTP(host, port, timeout=25) as s:
-                s.ehlo()
-                s.starttls()
-                s.ehlo()
-                s.login(user, password)
-                s.sendmail(from_addr, [to_email], msg.as_string())
-        print(f"[EMAIL OTP OK] sent to {to_email}")
-        return True
-    except Exception as e:
-        print("smtp send:", e)
-        print(f"[EMAIL OTP TEST fallback] {to_email} code={code}")
-        return False
+    msg.attach(MIMEText(body, "plain", "utf-8"))
+    raw = msg.as_string()
 
+    ctx = ssl.create_default_context()
+    errors = []
+
+    def try_ssl(p):
+        with smtplib.SMTP_SSL(host, p, timeout=30, context=ctx) as s:
+            s.login(user, password)
+            s.sendmail(from_addr, [to_email], raw)
+
+    def try_starttls(p):
+        with smtplib.SMTP(host, p, timeout=30) as s:
+            s.ehlo()
+            s.starttls(context=ctx)
+            s.ehlo()
+            s.login(user, password)
+            s.sendmail(from_addr, [to_email], raw)
+
+    # ordine: porta configurata, poi alternative
+    attempts = []
+    if port == 465:
+        attempts = [(try_ssl, 465), (try_starttls, 587), (try_ssl, 465)]
+    elif port == 587:
+        attempts = [(try_starttls, 587), (try_ssl, 465)]
+    else:
+        attempts = [(try_ssl, port), (try_starttls, port), (try_ssl, 465), (try_starttls, 587)]
+
+    seen = set()
+    for fn, p in attempts:
+        key = (fn.__name__, p)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            print(f"[SMTP] trying {fn.__name__} port={p}…")
+            fn(p)
+            print(f"[EMAIL OTP OK] sent to {to_email} via {fn.__name__}:{p}")
+            return True
+        except Exception as e:
+            err = f"{fn.__name__}:{p} -> {type(e).__name__}: {e}"
+            print("[SMTP] fail", err)
+            errors.append(err)
+
+    print("[SMTP] all attempts failed:", " | ".join(errors))
+    print(f"[EMAIL OTP TEST fallback] {to_email} code={code}")
+    return False
 
 
 @app.get("/verify-phone", response_class=HTMLResponse)
@@ -4463,6 +4502,36 @@ async def storage_signed_url(path: str, expires_sec: int = 3600) -> str:
     if signed.startswith("http"):
         return signed
     return f"{SUPABASE_URL}/storage/v1{signed}"
+
+
+
+@app.get("/admin/smtp-test")
+async def admin_smtp_test(req: Request):
+    """Test invio email OTP (solo admin). Apri: /admin/smtp-test?to=tua@email.com"""
+    admin = require_admin(req)
+    if not admin:
+        return RedirectResponse("/login", 303)
+    import os, json
+    to = (req.query_params.get("to") or admin.get("email") or "").strip()
+    host = (os.environ.get("SMTP_HOST") or "").strip()
+    user = (os.environ.get("SMTP_USER") or "").strip()
+    password = (os.environ.get("SMTP_PASS") or "").strip()
+    port = (os.environ.get("SMTP_PORT") or "").strip()
+    frm = (os.environ.get("SMTP_FROM") or "").strip()
+    info = {
+        "SMTP_HOST": host or None,
+        "SMTP_PORT": port or None,
+        "SMTP_USER": user or None,
+        "SMTP_FROM": frm or None,
+        "SMTP_PASS_set": bool(password),
+        "SMTP_PASS_len": len(password) if password else 0,
+        "to": to,
+    }
+    if not to:
+        return JSONResponse({**info, "ok": False, "error": "passa ?to=email@dominio.com"})
+    code = "123456"
+    ok = send_otp_email(to, code, phone="+390000000000")
+    return JSONResponse({**info, "ok": ok, "note": "Se ok=false leggi i log Render (smtp send / SMTP fail). Se ok=true controlla inbox+spam."})
 
 
 @app.get("/admin/storage-test")

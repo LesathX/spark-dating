@@ -30,7 +30,11 @@
             <h1 class="font-hot text-3xl tracking-wide">{{ altro.nome }}{% if altro.eta %}, {{ altro.eta }}{% endif %}</h1>
             {% if altro.citta %}<p class="text-gray-400 text-sm mt-1">📍 {{ altro.citta }}</p>{% endif %}
             {% if altro.bio %}<p class="text-gray-300 text-sm mt-4">{{ altro.bio }}</p>{% endif %}
-            <div class="flex gap-2 mt-6">
+            <div class="flex gap-2 mt-6 flex-wrap">
+                {% if altro.id != user.id %}
+                <button type="button" onclick="openReportUni({{ altro.id }}, 'profile', {{ altro.id }}, 'Segnala profilo di {{ altro.nome }}')"
+                  class="px-4 py-3 rounded-xl bg-white/10 border border-yellow-500/40 text-yellow-400 text-sm">⚠️ Segnala</button>
+                {% endif %}
                 {% if is_match %}
                 {% if conv_id %}
                 <a href="/chat/{{ conv_id }}" class="flex-1 text-center bg-[#ff0000] py-3 rounded-xl font-semibold">💬 Chat</a>
@@ -47,17 +51,69 @@
             <h2 class="font-hot text-lg mt-8 mb-3">FOTO</h2>
             <div class="grid grid-cols-3 gap-2">
                 {% for p in photos %}
-                <div class="aspect-square rounded-xl overflow-hidden bg-black border border-white/10">
+                <div class="relative aspect-square rounded-xl overflow-hidden bg-black border border-white/10">
                     {% if p.media_type == 'video' %}
                     <video src="{{ p.url }}" class="w-full h-full object-cover" muted></video>
                     {% else %}
                     <img src="{{ p.url }}" class="w-full h-full object-cover" alt="">
                     {% endif %}
+                    <button type="button" onclick="openReportUni({{ altro.id }}, 'gallery', {{ p.id }}, 'Segnala foto')"
+                      class="absolute top-1 right-1 bg-black/70 text-yellow-400 text-[10px] px-1.5 py-0.5 rounded">⚠️</button>
                 </div>
                 {% endfor %}
             </div>
             {% endif %}
         </div>
     </div>
+
+<!-- Report modal universale -->
+<div id="report-modal-uni" class="hidden fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4">
+  <div class="w-full max-w-sm bg-[#111] border border-white/15 rounded-2xl p-5">
+    <h2 class="font-hot text-2xl text-[#ff0000] mb-1">SEGNALA</h2>
+    <p class="text-sm text-gray-400 mb-3" id="report-uni-label">Segnala questo contenuto</p>
+    <form method="post" action="/report" id="form-report-uni">
+      <input type="hidden" name="reported_user_id" id="report-uni-user" value="">
+      <input type="hidden" name="content_type" id="report-uni-type" value="user">
+      <input type="hidden" name="content_id" id="report-uni-id" value="">
+      <input type="hidden" name="redirect" id="report-uni-redirect" value="">
+      <textarea name="motivo" required minlength="3" rows="3" placeholder="Motivo (spam, molestie, contenuti illegali…)"
+        class="w-full bg-black border border-white/20 rounded-xl px-3 py-2 text-sm mb-3 outline-none focus:border-[#ff0000]"></textarea>
+      <div class="flex flex-wrap gap-1.5 mb-3">
+        <button type="button" class="rq text-[10px] px-2 py-1 rounded-lg bg-white/5 border border-white/10" data-m="Spam">Spam</button>
+        <button type="button" class="rq text-[10px] px-2 py-1 rounded-lg bg-white/5 border border-white/10" data-m="Molestie">Molestie</button>
+        <button type="button" class="rq text-[10px] px-2 py-1 rounded-lg bg-white/5 border border-white/10" data-m="Contenuto offensivo">Offensivo</button>
+        <button type="button" class="rq text-[10px] px-2 py-1 rounded-lg bg-white/5 border border-white/10" data-m="Profilo falso">Falso</button>
+      </div>
+      <label class="flex items-center gap-2 text-xs text-gray-400 mb-4">
+        <input type="checkbox" name="also_block" value="1" class="rounded"> Blocca anche l’utente
+      </label>
+      <div class="flex gap-2">
+        <button type="button" onclick="closeReportUni()" class="flex-1 py-2.5 rounded-xl border border-white/20 text-sm">Annulla</button>
+        <button type="submit" class="flex-1 py-2.5 rounded-xl bg-[#ff0000] text-sm font-semibold">Invia</button>
+      </div>
+    </form>
+  </div>
+</div>
+<script>
+function openReportUni(userId, contentType, contentId, label) {
+  document.getElementById('report-uni-user').value = userId || '';
+  document.getElementById('report-uni-type').value = contentType || 'user';
+  document.getElementById('report-uni-id').value = contentId || '';
+  document.getElementById('report-uni-redirect').value = location.pathname + location.search;
+  document.getElementById('report-uni-label').textContent = label || 'Segnala questo contenuto';
+  document.getElementById('report-modal-uni').classList.remove('hidden');
+}
+function closeReportUni() {
+  document.getElementById('report-modal-uni').classList.add('hidden');
+}
+document.querySelectorAll('.rq').forEach(b => b.addEventListener('click', () => {
+  const ta = document.querySelector('#form-report-uni textarea[name=motivo]');
+  if (ta) ta.value = b.getAttribute('data-m');
+}));
+document.getElementById('report-modal-uni')?.addEventListener('click', e => {
+  if (e.target.id === 'report-modal-uni') closeReportUni();
+});
+</script>
+
 </body>
 </html>

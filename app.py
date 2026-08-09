@@ -341,7 +341,7 @@ async def reg(req: Request, email: str = Form(...), password: str = Form(...), u
         cur.execute("INSERT INTO user_preferences (user_id) VALUES (%s)", (uid,))
         c.commit()
         req.session["user_id"] = uid
-        return RedirectResponse("/discover", 303)
+        return RedirectResponse("/verify-phone", 303)
     except psycopg2.IntegrityError:
         c.rollback()
         return templates.TemplateResponse("register.html", {"request": req, "error": "Email o username gia in uso"})
@@ -1672,6 +1672,364 @@ async def chat_report(req: Request, conversation_id: int, motivo: str = Form("")
     return RedirectResponse("/chats?reported=1&blocked=1", 303)
 
 
+
+@app.post("/report")
+async def universal_report(req: Request):
+    """Segnalazione universale: profilo, gallery, messaggio, commento, annuncio…"""
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    form = await req.form()
+    motivo = (form.get("motivo") or "").strip()
+    try:
+        reported_user_id = int(form.get("reported_user_id") or 0)
+    except Exception:
+        reported_user_id = 0
+    content_type = (form.get("content_type") or "user").strip()[:40]
+    content_id = (form.get("content_id") or "").strip()[:40]
+    also_block = form.get("also_block") in ("1", "on", "true", "yes")
+    redirect = (form.get("redirect") or "/notifications").strip() or "/notifications"
+    if not redirect.startswith("/"):
+        redirect = "/notifications"
+    if len(motivo) < 3 or not reported_user_id:
+        return RedirectResponse(redirect + ("&" if "?" in redirect else "?") + "err=report", 303)
+    if reported_user_id == user["id"]:
+        return RedirectResponse(redirect, 303)
+
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS reports (
+                id SERIAL PRIMARY KEY,
+                reporter_id INTEGER,
+                reported_id INTEGER,
+                motivo TEXT,
+                conversation_id INTEGER,
+                content_type VARCHAR(40),
+                content_id VARCHAR(40),
+                status VARCHAR(20) DEFAULT 'open',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        c.commit()
+    except Exception:
+        try:
+            c.rollback()
+        except Exception:
+            pass
+    try:
+        cur.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS content_type VARCHAR(40)")
+        cur.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS content_id VARCHAR(40)")
+        c.commit()
+    except Exception:
+        try:
+            c.rollback()
+        except Exception:
+            pass
+
+    # anti-spam: stesso reporter + stesso contenuto
+    try:
+        cur.execute(
+            """SELECT id FROM reports WHERE reporter_id=%s AND reported_id=%s
+               AND COALESCE(content_type,'')=%s AND COALESCE(content_id,'')=%s
+               AND COALESCE(created_at,NOW()) > NOW() - interval '24 hours' LIMIT 1""",
+            (user["id"], reported_user_id, content_type, content_id),
+        )
+        if cur.fetchone():
+            cur.close()
+            c.close()
+            return RedirectResponse(redirect + ("&" if "?" in redirect else "?") + "reported=1", 303)
+    except Exception:
+        try:
+            c.rollback()
+        except Exception:
+            pass
+
+    try:
+        cur.execute(
+            """INSERT INTO reports (reporter_id, reported_id, motivo, content_type, content_id, status)
+               VALUES (%s,%s,%s,%s,%s,'open')""",
+            (user["id"], reported_user_id, motivo[:500], content_type, content_id or None),
+        )
+    except Exception as e:
+        print("universal report insert:", e)
+        try:
+            c.rollback()
+            cur.execute(
+                """INSERT INTO reports (reporter_id, reported_id, motivo) VALUES (%s,%s,%s)""",
+                (user["id"], reported_user_id, f"[{content_type}:{content_id}] {motivo[:400]}"),
+            )
+        except Exception as e2:
+            print("universal report fallback:", e2)
+            try:
+                c.rollback()
+            except Exception:
+                pass
+
+    if also_block:
+        try:
+            cur.execute(
+                "INSERT INTO blocks (blocker_id, blocked_id) VALUES (%s,%s) ON CONFLICT DO NOTHING",
+                (user["id"], reported_user_id),
+            )
+        except Exception:
+            try:
+                c.rollback()
+                cur.execute("INSERT INTO blocks (blocker_id, blocked_id) VALUES (%s,%s)", (user["id"], reported_user_id))
+            except Exception:
+                try:
+                    c.rollback()
+                except Exception:
+                    pass
+
+    # notifica staff
+    try:
+        cur.execute("""
+            SELECT id FROM users
+            WHERE COALESCE(is_admin,0)=1 OR COALESCE(is_mod,0)=1 OR COALESCE(ruolo,'') IN ('admin','mod')
+        """)
+        for a in cur.fetchall():
+            cur.execute(
+                """INSERT INTO notifications (user_id,tipo,titolo,contenuto,related_id)
+                   VALUES (%s,'report',%s,%s,%s)""",
+                (a["id"], f"⚠️ Segnalazione ({content_type})",
+                 f"{user.get('nome') or user['id']} → user {reported_user_id}: {motivo[:120]}",
+                 reported_user_id),
+            )
+    except Exception as e:
+        print("report notif:", e)
+        try:
+            c.rollback()
+        except Exception:
+            pass
+
+    try:
+        c.commit()
+    except Exception:
+        pass
+    cur.close()
+    c.close()
+    sep = "&" if "?" in redirect else "?"
+    return RedirectResponse(f"{redirect}{sep}reported=1", 303)
+
+
+def _normalize_phone(prefix: str, phone: str) -> str:
+    digits = "".join(ch for ch in (phone or "") if ch.isdigit())
+    prefix = (prefix or "+39").strip()
+    if not prefix.startswith("+"):
+        prefix = "+" + prefix
+    # togli 0 iniziale nazionale
+    if digits.startswith("0"):
+        digits = digits[1:]
+    return prefix + digits
+
+
+def _send_sms_otp(phone_e164: str, code: str) -> tuple:
+    """Ritorna (ok, mode). mode=twilio|test"""
+    import os, urllib.request, urllib.parse, base64
+    sid = os.environ.get("TWILIO_ACCOUNT_SID", "").strip()
+    token = os.environ.get("TWILIO_AUTH_TOKEN", "").strip()
+    from_num = os.environ.get("TWILIO_FROM_NUMBER", "").strip()
+    if sid and token and from_num:
+        try:
+            url = f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
+            data = urllib.parse.urlencode({
+                "To": phone_e164,
+                "From": from_num,
+                "Body": f"MyCheating codice verifica: {code}. Valido 10 minuti.",
+            }).encode()
+            req = urllib.request.Request(url, data=data, method="POST")
+            cred = base64.b64encode(f"{sid}:{token}".encode()).decode()
+            req.add_header("Authorization", f"Basic {cred}")
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                if resp.status in (200, 201):
+                    return True, "twilio"
+            return False, "twilio"
+        except Exception as e:
+            print("twilio sms:", e)
+            return False, "twilio"
+    # test mode
+    print(f"[OTP TEST] {phone_e164} -> {code}")
+    return True, "test"
+
+
+@app.get("/verify-phone", response_class=HTMLResponse)
+async def verify_phone_page(req: Request):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    if user.get("phone_verified"):
+        return RedirectResponse("/profile?phone=ok", 303)
+    return templates.TemplateResponse("verify_phone.html", {
+        "request": req, "user": user, "step": "phone", "error": None, "ok": None, "test_otp": None,
+    })
+
+
+@app.post("/verify-phone/send")
+async def verify_phone_send(req: Request, prefix: str = Form("+39"), phone: str = Form(...)):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    e164 = _normalize_phone(prefix, phone)
+    if len(e164) < 10 or len(e164) > 18:
+        return templates.TemplateResponse("verify_phone.html", {
+            "request": req, "user": user, "step": "phone", "error": "Numero non valido",
+            "phone_display": phone, "ok": None, "test_otp": None,
+        })
+    import random
+    from datetime import datetime, timedelta
+    code = f"{random.randint(0, 999999):06d}"
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS phone_otps (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                phone VARCHAR(32) NOT NULL,
+                code VARCHAR(10) NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                used INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        c.commit()
+    except Exception:
+        try:
+            c.rollback()
+        except Exception:
+            pass
+    # rate limit: max 5 OTP / ora
+    try:
+        cur.execute(
+            """SELECT COUNT(*) as n FROM phone_otps
+               WHERE user_id=%s AND created_at > NOW() - interval '1 hour'""",
+            (user["id"],),
+        )
+        if int(cur.fetchone()["n"] or 0) >= 5:
+            cur.close()
+            c.close()
+            return templates.TemplateResponse("verify_phone.html", {
+                "request": req, "user": user, "step": "phone",
+                "error": "Troppi tentativi. Riprova tra un'ora.", "ok": None, "test_otp": None,
+            })
+    except Exception:
+        try:
+            c.rollback()
+        except Exception:
+            pass
+    # telefono già usato da altro account verificato?
+    try:
+        cur.execute(
+            "SELECT id FROM users WHERE telefono=%s AND COALESCE(phone_verified,0)=1 AND id<>%s LIMIT 1",
+            (e164, user["id"]),
+        )
+        if cur.fetchone():
+            cur.close()
+            c.close()
+            return templates.TemplateResponse("verify_phone.html", {
+                "request": req, "user": user, "step": "phone",
+                "error": "Questo numero è già verificato su un altro account.", "ok": None, "test_otp": None,
+            })
+    except Exception:
+        try:
+            c.rollback()
+        except Exception:
+            pass
+
+    ok_sms, mode = _send_sms_otp(e164, code)
+    if not ok_sms and mode == "twilio":
+        cur.close()
+        c.close()
+        return templates.TemplateResponse("verify_phone.html", {
+            "request": req, "user": user, "step": "phone",
+            "error": "Invio SMS fallito. Riprova o contatta supporto.", "ok": None, "test_otp": None,
+        })
+    try:
+        cur.execute(
+            """INSERT INTO phone_otps (user_id, phone, code, expires_at)
+               VALUES (%s,%s,%s, NOW() + interval '10 minutes')""",
+            (user["id"], e164, code),
+        )
+        c.commit()
+    except Exception as e:
+        print("otp insert:", e)
+        try:
+            c.rollback()
+        except Exception:
+            pass
+    cur.close()
+    c.close()
+    return templates.TemplateResponse("verify_phone.html", {
+        "request": req, "user": user, "step": "otp",
+        "phone": e164, "phone_display": e164, "phone_raw": phone, "prefix": prefix,
+        "error": None, "ok": "Codice inviato" if mode == "twilio" else None,
+        "test_otp": code if mode == "test" else None,
+    })
+
+
+@app.post("/verify-phone/confirm")
+async def verify_phone_confirm(req: Request, phone: str = Form(...), otp: str = Form(...)):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    code = "".join(ch for ch in otp if ch.isdigit())
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute(
+            """SELECT id FROM phone_otps
+               WHERE user_id=%s AND phone=%s AND code=%s AND used=0
+                 AND expires_at > NOW()
+               ORDER BY id DESC LIMIT 1""",
+            (user["id"], phone, code),
+        )
+        row = cur.fetchone()
+        if not row:
+            cur.close()
+            c.close()
+            return templates.TemplateResponse("verify_phone.html", {
+                "request": req, "user": user, "step": "otp", "phone": phone,
+                "phone_display": phone, "error": "Codice errato o scaduto", "ok": None, "test_otp": None,
+            })
+        cur.execute("UPDATE phone_otps SET used=1 WHERE id=%s", (row["id"],))
+        try:
+            cur.execute(
+                """UPDATE users SET telefono=%s, phone_verified=1, phone_verified_at=NOW() WHERE id=%s""",
+                (phone, user["id"]),
+            )
+        except Exception:
+            c.rollback()
+            cur.execute("UPDATE users SET telefono=%s WHERE id=%s", (phone, user["id"]))
+        c.commit()
+    except Exception as e:
+        print("verify confirm:", e)
+        try:
+            c.rollback()
+        except Exception:
+            pass
+        cur.close()
+        c.close()
+        return templates.TemplateResponse("verify_phone.html", {
+            "request": req, "user": user, "step": "otp", "phone": phone,
+            "phone_display": phone, "error": "Errore verifica", "ok": None, "test_otp": None,
+        })
+    cur.close()
+    c.close()
+    return RedirectResponse("/profile?phone=verified", 303)
+
+
+@app.get("/verify-phone/skip")
+async def verify_phone_skip(req: Request):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    # soft skip: consente uso app ma banner possibile
+    return RedirectResponse("/discover", 303)
+
+
+
 @app.get("/profile", response_class=HTMLResponse)
 async def profile_page(req: Request):
     user = current_user(req)
@@ -2063,6 +2421,9 @@ async def admin_panel(req: Request):
         cur0.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip VARCHAR(64)")
         cur0.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_bot INTEGER DEFAULT 0")
         cur0.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS false_reports_count INTEGER DEFAULT 0")
+        cur0.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS telefono VARCHAR(32)")
+        cur0.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified INTEGER DEFAULT 0")
+        cur0.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMP")
         c0.commit()
         cur0.close()
         c0.close()
@@ -2073,6 +2434,7 @@ async def admin_panel(req: Request):
     mq = (req.query_params.get("mq") or "").strip()
     message_hits = []
     bots = []
+    phones = []
     fq = (req.query_params.get("fq") or "").strip()
     filter_stato = req.query_params.get("filter") or "tutti"
 
@@ -2554,7 +2916,28 @@ async def admin_panel(req: Request):
     search_results = []  # lista globale {tipo, titolo, sottotitolo, link, meta}
 
 
+    phones = []
+    if tab == "telefoni":
+        try:
+            cur.execute("""
+                SELECT id, nome, username, email, telefono, phone_verified, phone_verified_at, stato, last_ip
+                FROM users
+                WHERE telefono IS NOT NULL AND telefono <> ''
+                ORDER BY COALESCE(phone_verified,0) DESC, id DESC
+                LIMIT 200
+            """)
+            phones = [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            print("admin phones:", e)
+            try:
+                c.rollback()
+                cur.execute("SELECT id, nome, username, email, telefono, stato FROM users WHERE telefono IS NOT NULL LIMIT 200")
+                phones = [dict(r) for r in cur.fetchall()]
+            except Exception:
+                phones = []
+
     if tab == "bot":
+
         try:
             cur.execute("""
                 SELECT id, nome, username, email, stato, credits, bio, citta, genere,
@@ -2808,6 +3191,7 @@ async def admin_panel(req: Request):
         "reports": reports if tab == "segnalazioni" else [],
         "reports_open": reports_open if tab == "segnalazioni" else 0,
         "bots": bots,
+        "phones": phones if tab == "telefoni" else [],
         "mq": mq,
         "message_hits": message_hits,
         "search_results": search_results,

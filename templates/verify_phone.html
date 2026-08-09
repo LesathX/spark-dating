@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verifica telefono – MyCheating</title>
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background:#0a0a0a; font-family:'Oswald',sans-serif; }
+    .font-hot { font-family:'Bebas Neue',sans-serif; letter-spacing:1px; }
+  </style>
+</head>
+<body class="text-white min-h-screen flex items-center justify-center p-4">
+  <div class="w-full max-w-md border border-white/10 rounded-2xl p-6 bg-black/60">
+    <h1 class="font-hot text-3xl tracking-wide text-[#ff0000] mb-1">VERIFICA ACCOUNT</h1>
+    <p class="text-sm text-gray-400 mb-6">Inserisci il tuo numero di cellulare. Ti invieremo un codice OTP per confermare che sei tu.</p>
+
+    {% if error %}
+    <div class="mb-4 text-sm text-red-400 bg-red-900/20 border border-red-500/30 rounded-xl px-4 py-2">{{ error }}</div>
+    {% endif %}
+    {% if ok %}
+    <div class="mb-4 text-sm text-green-400 bg-green-900/20 border border-green-500/30 rounded-xl px-4 py-2">{{ ok }}</div>
+    {% endif %}
+    {% if test_otp %}
+    <div class="mb-4 text-sm text-yellow-300 bg-yellow-900/20 border border-yellow-500/30 rounded-xl px-4 py-2">
+      🧪 <strong>Modalità test</strong> (SMS non configurato): codice OTP = <span class="font-mono text-lg">{{ test_otp }}</span>
+    </div>
+    {% endif %}
+
+    {% if step == 'phone' or not step %}
+    <form method="post" action="/verify-phone/send" class="space-y-4">
+      <div>
+        <label class="text-xs text-gray-500">Numero di telefono *</label>
+        <div class="flex gap-2 mt-1">
+          <select name="prefix" class="bg-black border border-white/20 rounded-xl px-3 py-3 text-sm w-28">
+            <option value="+39" selected>+39 IT</option>
+            <option value="+33">+33 FR</option>
+            <option value="+41">+41 CH</option>
+            <option value="+49">+49 DE</option>
+            <option value="+34">+34 ES</option>
+            <option value="+44">+44 UK</option>
+            <option value="+1">+1 US</option>
+          </select>
+          <input name="phone" type="tel" required placeholder="333 1234567"
+                 class="flex-1 bg-black border border-white/20 rounded-xl px-4 py-3 text-sm outline-none focus:border-[#ff0000]"
+                 value="{{ phone_display or '' }}">
+        </div>
+        <p class="text-[10px] text-gray-600 mt-1">Formato internazionale. Useremo il numero solo per sicurezza dell’account.</p>
+      </div>
+      <button class="w-full bg-[#ff0000] py-3 rounded-xl font-semibold">Invia codice OTP</button>
+    </form>
+    {% else %}
+    <form method="post" action="/verify-phone/confirm" class="space-y-4">
+      <input type="hidden" name="phone" value="{{ phone }}">
+      <p class="text-sm text-gray-400">Codice inviato a <strong class="text-white">{{ phone_display }}</strong></p>
+      <div>
+        <label class="text-xs text-gray-500">Codice OTP (6 cifre)</label>
+        <input name="otp" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required
+               class="w-full mt-1 bg-black border border-white/20 rounded-xl px-4 py-3 text-center text-2xl tracking-[0.4em] outline-none focus:border-[#ff0000]"
+               placeholder="••••••" autocomplete="one-time-code">
+      </div>
+      <button class="w-full bg-[#ff0000] py-3 rounded-xl font-semibold">Conferma</button>
+    </form>
+    <form method="post" action="/verify-phone/send" class="mt-3">
+      <input type="hidden" name="prefix" value="{{ prefix or '+39' }}">
+      <input type="hidden" name="phone" value="{{ phone_raw or '' }}">
+      <button class="w-full text-xs text-gray-400 py-2">Rinvia codice</button>
+    </form>
+    {% endif %}
+
+    <div class="mt-6 flex justify-between text-xs text-gray-500">
+      <a href="/verify-phone/skip" class="hover:text-white">Salta per ora →</a>
+      <a href="/profile" class="hover:text-white">Profilo</a>
+    </div>
+  </div>
+</body>
+</html>

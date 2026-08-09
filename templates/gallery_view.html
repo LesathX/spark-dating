@@ -21,11 +21,15 @@
         <h2 class="font-hot text-lg mb-3">Pubblici</h2>
         <div class="grid grid-cols-2 gap-3 mb-8">
             {% for p in public %}
-            <div class="aspect-square rounded-xl overflow-hidden border border-white/10 bg-black">
-                {% if p.media_type == 'video' or '.mp4' in p.url or '.webm' in p.url or '.mov' in p.url %}
+            <div class="relative aspect-square rounded-xl overflow-hidden border border-white/10 bg-black group">
+                {% if p.media_type == 'video' or '.mp4' in (p.url or '') or '.webm' in (p.url or '') or '.mov' in (p.url or '') %}
                 <video src="{{ p.url }}" class="w-full h-full object-cover" controls playsinline></video>
                 {% else %}
                 <a href="{{ p.url }}" target="_blank"><img src="{{ p.url }}" class="w-full h-full object-cover" alt=""></a>
+                {% endif %}
+                {% if owner and owner.id != user.id %}
+                <button type="button" onclick="openReportUni({{ owner.id }}, 'gallery', {{ p.id }}, 'Segnala media di {{ owner.nome }}')"
+                  class="absolute top-1 right-1 bg-black/70 text-yellow-400 text-xs px-2 py-1 rounded-lg border border-white/20">⚠️</button>
                 {% endif %}
             </div>
             {% else %}
@@ -54,5 +58,55 @@
         </div>
         {% endif %}
     </div>
+
+<!-- Report modal universale -->
+<div id="report-modal-uni" class="hidden fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4">
+  <div class="w-full max-w-sm bg-[#111] border border-white/15 rounded-2xl p-5">
+    <h2 class="font-hot text-2xl text-[#ff0000] mb-1">SEGNALA</h2>
+    <p class="text-sm text-gray-400 mb-3" id="report-uni-label">Segnala questo contenuto</p>
+    <form method="post" action="/report" id="form-report-uni">
+      <input type="hidden" name="reported_user_id" id="report-uni-user" value="">
+      <input type="hidden" name="content_type" id="report-uni-type" value="user">
+      <input type="hidden" name="content_id" id="report-uni-id" value="">
+      <input type="hidden" name="redirect" id="report-uni-redirect" value="">
+      <textarea name="motivo" required minlength="3" rows="3" placeholder="Motivo (spam, molestie, contenuti illegali…)"
+        class="w-full bg-black border border-white/20 rounded-xl px-3 py-2 text-sm mb-3 outline-none focus:border-[#ff0000]"></textarea>
+      <div class="flex flex-wrap gap-1.5 mb-3">
+        <button type="button" class="rq text-[10px] px-2 py-1 rounded-lg bg-white/5 border border-white/10" data-m="Spam">Spam</button>
+        <button type="button" class="rq text-[10px] px-2 py-1 rounded-lg bg-white/5 border border-white/10" data-m="Molestie">Molestie</button>
+        <button type="button" class="rq text-[10px] px-2 py-1 rounded-lg bg-white/5 border border-white/10" data-m="Contenuto offensivo">Offensivo</button>
+        <button type="button" class="rq text-[10px] px-2 py-1 rounded-lg bg-white/5 border border-white/10" data-m="Profilo falso">Falso</button>
+      </div>
+      <label class="flex items-center gap-2 text-xs text-gray-400 mb-4">
+        <input type="checkbox" name="also_block" value="1" class="rounded"> Blocca anche l’utente
+      </label>
+      <div class="flex gap-2">
+        <button type="button" onclick="closeReportUni()" class="flex-1 py-2.5 rounded-xl border border-white/20 text-sm">Annulla</button>
+        <button type="submit" class="flex-1 py-2.5 rounded-xl bg-[#ff0000] text-sm font-semibold">Invia</button>
+      </div>
+    </form>
+  </div>
+</div>
+<script>
+function openReportUni(userId, contentType, contentId, label) {
+  document.getElementById('report-uni-user').value = userId || '';
+  document.getElementById('report-uni-type').value = contentType || 'user';
+  document.getElementById('report-uni-id').value = contentId || '';
+  document.getElementById('report-uni-redirect').value = location.pathname + location.search;
+  document.getElementById('report-uni-label').textContent = label || 'Segnala questo contenuto';
+  document.getElementById('report-modal-uni').classList.remove('hidden');
+}
+function closeReportUni() {
+  document.getElementById('report-modal-uni').classList.add('hidden');
+}
+document.querySelectorAll('.rq').forEach(b => b.addEventListener('click', () => {
+  const ta = document.querySelector('#form-report-uni textarea[name=motivo]');
+  if (ta) ta.value = b.getAttribute('data-m');
+}));
+document.getElementById('report-modal-uni')?.addEventListener('click', e => {
+  if (e.target.id === 'report-modal-uni') closeReportUni();
+});
+</script>
+
 </body>
 </html>

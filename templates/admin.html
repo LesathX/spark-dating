@@ -782,6 +782,50 @@ BOT
         {% endfor %}
       </div>
 
+
+      {% elif tab == 'telefoni' %}
+      <h1 class="font-hot text-4xl tracking-wide mb-2">TELEFONI</h1>
+      <p class="text-gray-500 text-sm mb-6">Numeri verificati e registrati dagli utenti</p>
+      <div class="border border-white/10 rounded-xl overflow-hidden">
+        <table class="w-full text-sm">
+          <thead class="text-[11px] text-gray-500 border-b border-white/10">
+            <tr>
+              <th class="px-4 py-3 text-left">UTENTE</th>
+              <th class="px-4 py-3 text-left">TELEFONO</th>
+              <th class="px-4 py-3 text-left">VERIFICATO</th>
+              <th class="px-4 py-3 text-left">DATA</th>
+              <th class="px-4 py-3 text-left">IP</th>
+              <th class="px-4 py-3 text-right">AZIONE</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in phones %}
+            <tr class="border-b border-white/5 hover:bg-white/5">
+              <td class="px-4 py-3">
+                <div class="font-semibold">{{ p.nome or '—' }}</div>
+                <div class="text-[10px] text-gray-500">@{{ p.username }} · {{ p.email }}</div>
+              </td>
+              <td class="px-4 py-3 font-mono text-xs">{{ p.telefono }}</td>
+              <td class="px-4 py-3">
+                {% if p.phone_verified %}
+                <span class="text-[10px] bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full">✓ SÌ</span>
+                {% else %}
+                <span class="text-[10px] bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded-full">NO</span>
+                {% endif %}
+              </td>
+              <td class="px-4 py-3 text-xs text-gray-500">{{ p.phone_verified_at or '—' }}</td>
+              <td class="px-4 py-3 text-[11px] font-mono text-gray-500">{{ p.last_ip or '—' }}</td>
+              <td class="px-4 py-3 text-right">
+                <button type="button" onclick="openManage({{ p.id }})" class="text-xs border border-white/20 px-3 py-1.5 rounded-lg">GESTISCI</button>
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">Nessun numero registrato</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
       <!-- ========== PLACEHOLDER SEZIONI ========== -->
       {% else %}
       <h1 class="font-hot text-4xl tracking-wide mb-2">

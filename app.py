@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from fastapi import FastAPI, Request, Form, WebSocket, WebSocketDisconnect, UploadFile, File
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -158,6 +158,9 @@ SPELLS = {
     "boost": {"cost": 20, "label": "Boost profilo"},
 }
 
+
+
+
 def spend_credits(user_id, amount, motivo="", related_id=None):
     """Scala crediti e registra transazione. Ritorna True se ok (sempre bool)."""
     if amount <= 0:
@@ -308,14 +311,128 @@ def active_spell(user_id, spell_code):
     except Exception:
         return None
 
+def set_user_online(uid: int, online: bool = True):
+    """Aggiorna is_online + ultimo_accesso in modo affidabile."""
+    try:
+        c = db()
+        cur = c.cursor()
+        if online:
+            cur.execute(
+                "UPDATE users SET is_online=1, ultimo_accesso=CURRENT_TIMESTAMP WHERE id=%s",
+                (uid,),
+            )
+        else:
+            cur.execute(
+                "UPDATE users SET is_online=0, ultimo_accesso=CURRENT_TIMESTAMP WHERE id=%s",
+                (uid,),
+            )
+        c.commit()
+        cur.close()
+        c.close()
+    except Exception as e:
+        print("set_user_online:", e)
+
+
+def format_last_seen(user_row) -> str:
+    """Testo leggibile: Online / Ultimo accesso …"""
+    if not user_row:
+        return ""
+    if user_row.get("is_online"):
+        return "Online"
+    ua = user_row.get("ultimo_accesso")
+    if not ua:
+        return "Offline"
+    try:
+        from datetime import datetime, timezone
+        if hasattr(ua, "timestamp"):
+            ts = ua.replace(tzinfo=timezone.utc).timestamp() if ua.tzinfo is None else ua.timestamp()
+        else:
+            return "Offline"
+        import time
+        diff = max(0, int(time.time() - ts))
+        if diff < 60:
+            return "Ultimo accesso: ora"
+        if diff < 3600:
+            return f"Ultimo accesso: {diff // 60} min fa"
+        if diff < 86400:
+            return f"Ultimo accesso: {diff // 3600} h fa"
+        return f"Ultimo accesso: {diff // 86400} g fa"
+    except Exception:
+        return "Offline"
+
+
+def has_active_boost(user_id: int) -> bool:
+    try:
+        c = db()
+        cur = c.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS user_boosts (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                starts_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL
+            )
+        """)
+        c.commit()
+        cur.execute(
+            "SELECT id FROM user_boosts WHERE user_id=%s AND expires_at > NOW() LIMIT 1",
+            (user_id,),
+        )
+        ok = bool(cur.fetchone())
+        cur.close(); c.close()
+        return ok
+    except Exception as e:
+        print("has_active_boost:", e)
+        return False
+
+
 @app.websocket("/ws/{uid}")
 async def ws_endpoint(websocket: WebSocket, uid: int):
     await manager.connect(uid, websocket)
+    set_user_online(uid, True)
     try:
         while True:
-            await websocket.receive_text()
+            raw = await websocket.receive_text()
+            try:
+                import json
+                data = json.loads(raw) if raw and raw[0] in "{[" else {"type": "ping"}
+            except Exception:
+                data = {"type": "ping"}
+            typ = (data.get("type") or "ping").lower()
+            if typ in ("ping", "heartbeat"):
+                set_user_online(uid, True)
+                try:
+                    await websocket.send_json({"type": "pong"})
+                except Exception:
+                    pass
+            elif typ in ("typing", "typing_start"):
+                to_uid = data.get("to_user_id")
+                conv = data.get("conversation_id")
+                if to_uid:
+                    await manager.send(int(to_uid), {
+                        "type": "typing",
+                        "from_user_id": uid,
+                        "conversation_id": conv,
+                        "active": True,
+                    })
+            elif typ in ("typing_stop", "stop_typing"):
+                to_uid = data.get("to_user_id")
+                conv = data.get("conversation_id")
+                if to_uid:
+                    await manager.send(int(to_uid), {
+                        "type": "typing",
+                        "from_user_id": uid,
+                        "conversation_id": conv,
+                        "active": False,
+                    })
+            elif typ == "presence":
+                set_user_online(uid, True)
+    except WebSocketDisconnect:
+        manager.disconnect(uid, websocket)
+        set_user_online(uid, False)
     except Exception:
         manager.disconnect(uid, websocket)
+        set_user_online(uid, False)
 
 @app.get("/", response_class=HTMLResponse)
 async def home(req: Request):
@@ -716,7 +833,12 @@ async def discover(req: Request):
                   AND u.id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = %s)
                   AND u.id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = %s)
                   {online_sql}
-                ORDER BY RANDOM() LIMIT 1
+                ORDER BY (
+                    CASE WHEN EXISTS (
+                        SELECT 1 FROM user_boosts ub
+                        WHERE ub.user_id = u.id AND ub.expires_at > NOW()
+                    ) THEN 0 ELSE 1 END
+                ), RANDOM() LIMIT 1
             """, (user["id"], user["id"], user["id"], user["id"]))
             cand = cur.fetchone()
     else:
@@ -728,7 +850,12 @@ async def discover(req: Request):
               AND u.id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = %s)
               AND u.id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = %s)
               {online_sql}
-            ORDER BY RANDOM() LIMIT 1
+            ORDER BY (
+                    CASE WHEN EXISTS (
+                        SELECT 1 FROM user_boosts ub
+                        WHERE ub.user_id = u.id AND ub.expires_at > NOW()
+                    ) THEN 0 ELSE 1 END
+                ), RANDOM() LIMIT 1
         """, (user["id"], user["id"], user["id"], user["id"]))
         cand = cur.fetchone()
 
@@ -1304,6 +1431,28 @@ async def chat_page(req: Request, conversation_id: int):
             "Aperitivo o cena?",
             "Qual è il tuo posto preferito in città?",
         ]
+        # stale online: se ultimo_accesso > 2 min → offline
+        try:
+            c2 = db()
+            cur2 = c2.cursor()
+            cur2.execute(
+                """UPDATE users SET is_online=0
+                   WHERE id=%s AND is_online=1
+                     AND ultimo_accesso IS NOT NULL
+                     AND ultimo_accesso < NOW() - interval '2 minutes'""",
+                (altro.get("id"),),
+            )
+            c2.commit()
+            cur2.execute("SELECT is_online, ultimo_accesso FROM users WHERE id=%s", (altro.get("id"),))
+            row2 = cur2.fetchone()
+            if row2:
+                altro["is_online"] = row2.get("is_online")
+                altro["ultimo_accesso"] = row2.get("ultimo_accesso")
+            cur2.close(); c2.close()
+        except Exception:
+            pass
+        last_seen = format_last_seen(altro)
+
         return templates.TemplateResponse("chat.html", {
             "request": req,
             "user": user,
@@ -1315,6 +1464,8 @@ async def chat_page(req: Request, conversation_id: int):
             "pending_request": pending_request,
             "photo_cost": 25,
             "icebreakers": icebreakers,
+            "last_seen": last_seen,
+            "stickers": STICKERS,
         })
     except Exception as e:
         print("chat template error:", type(e).__name__, e)
@@ -5337,6 +5488,290 @@ async def photos_view(req: Request, owner_id: int):
 
 
 # ============== INCANTESIMI ==============
+
+# ===================== STORIE 24h =====================
+@app.get("/stories", response_class=HTMLResponse)
+async def stories_feed(req: Request):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS stories (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                media_url TEXT NOT NULL,
+                media_type VARCHAR(20) DEFAULT 'image',
+                caption TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL
+            )
+        """)
+        c.commit()
+    except Exception:
+        try: c.rollback()
+        except Exception: pass
+    # storie attive raggruppate per utente (escludi scadute)
+    try:
+        cur.execute("""
+            SELECT s.*, u.nome, u.username, u.foto_principale_url
+            FROM stories s
+            JOIN users u ON u.id = s.user_id
+            WHERE s.expires_at > NOW()
+              AND COALESCE(u.is_bot,0)=0
+              AND u.stato='attivo'
+              AND s.user_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id=%s)
+              AND s.user_id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id=%s)
+            ORDER BY s.created_at DESC
+            LIMIT 100
+        """, (user["id"], user["id"]))
+        rows = [dict(r) for r in cur.fetchall()]
+    except Exception as e:
+        print("stories feed:", e)
+        rows = []
+    # raggruppa
+    by_user = {}
+    for r in rows:
+        by_user.setdefault(r["user_id"], {"user": r, "items": []})["items"].append(r)
+    groups = list(by_user.values())
+    # mie storie
+    try:
+        cur.execute(
+            "SELECT * FROM stories WHERE user_id=%s AND expires_at > NOW() ORDER BY created_at DESC",
+            (user["id"],),
+        )
+        my_stories = [dict(r) for r in cur.fetchall()]
+    except Exception:
+        my_stories = []
+    cur.close(); c.close()
+    return templates.TemplateResponse("stories.html", {
+        "request": req, "user": user, "groups": groups, "my_stories": my_stories,
+        "unread": unread_count(user["id"]),
+    })
+
+
+@app.post("/stories/create")
+async def stories_create(req: Request, caption: str = Form(""), file: UploadFile = File(None)):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    if not file or not file.filename:
+        return RedirectResponse("/stories?err=file", 303)
+    data = await file.read()
+    if not data or len(data) > MAX_UPLOAD_BYTES:
+        return RedirectResponse("/stories?err=size", 303)
+    import uuid
+    ext = (file.filename.rsplit(".", 1)[-1] if "." in file.filename else "jpg").lower()
+    is_video = ext in ("mp4", "webm", "mov")
+    media_type = "video" if is_video else "image"
+    path = f"stories/{user['id']}/{uuid.uuid4().hex}.{ext}"
+    # upload gallery bucket
+    url = None
+    try:
+        # reuse storage upload if exists
+        from urllib.request import Request as UrlReq, urlopen
+        import os
+        key = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_KEY") or ""
+        base = os.environ.get("SUPABASE_URL", SUPABASE_URL).rstrip("/")
+        bucket = os.environ.get("STORAGE_BUCKET", STORAGE_BUCKET)
+        if key and base:
+            upload_url = f"{base}/storage/v1/object/{bucket}/{path}"
+            req_u = UrlReq(upload_url, data=data, method="POST")
+            req_u.add_header("Authorization", f"Bearer {key}")
+            req_u.add_header("Content-Type", file.content_type or "application/octet-stream")
+            req_u.add_header("x-upsert", "true")
+            with urlopen(req_u, timeout=60) as resp:
+                if resp.status in (200, 201):
+                    url = f"{base}/storage/v1/object/public/{bucket}/{path}"
+    except Exception as e:
+        print("story upload:", e)
+    if not url:
+        # local fallback
+        dest = BASE_DIR / "static" / "uploads" / "stories" / str(user["id"])
+        dest.mkdir(parents=True, exist_ok=True)
+        fname = f"{uuid.uuid4().hex}.{ext}"
+        (dest / fname).write_bytes(data)
+        url = f"/static/uploads/stories/{user['id']}/{fname}"
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS stories (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                media_url TEXT NOT NULL,
+                media_type VARCHAR(20) DEFAULT 'image',
+                caption TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL
+            )
+        """)
+        cur.execute(
+            """INSERT INTO stories (user_id, media_url, media_type, caption, expires_at)
+               VALUES (%s,%s,%s,%s, NOW() + interval '24 hours')""",
+            (user["id"], url, media_type, (caption or "")[:200]),
+        )
+        c.commit()
+    except Exception as e:
+        print("story insert:", e)
+        try: c.rollback()
+        except Exception: pass
+    cur.close(); c.close()
+    return RedirectResponse("/stories?ok=1", 303)
+
+
+@app.post("/stories/delete/{story_id}")
+async def stories_delete(req: Request, story_id: int):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute("DELETE FROM stories WHERE id=%s AND user_id=%s", (story_id, user["id"]))
+        c.commit()
+    except Exception:
+        try: c.rollback()
+        except Exception: pass
+    cur.close(); c.close()
+    return RedirectResponse("/stories", 303)
+
+
+# ===================== GIF / STICKERS in chat =====================
+STICKERS = [
+    {"id": "🔥", "label": "Fuoco"},
+    {"id": "❤️", "label": "Cuore"},
+    {"id": "😍", "label": "Innamorato"},
+    {"id": "😂", "label": "Lol"},
+    {"id": "💋", "label": "Bacio"},
+    {"id": "😈", "label": "Diavolo"},
+    {"id": "🍑", "label": "Pesca"},
+    {"id": "👀", "label": "Occhi"},
+    {"id": "🙌", "label": "Hands"},
+    {"id": "✨", "label": "Sparkle"},
+    {"id": "🥵", "label": "Hot"},
+    {"id": "🌹", "label": "Rosa"},
+]
+
+
+@app.post("/chat/{conversation_id}/sticker")
+async def chat_sticker(req: Request, conversation_id: int, sticker: str = Form(...)):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    sticker = (sticker or "")[:16]
+    if not sticker:
+        return RedirectResponse(f"/chat/{conversation_id}", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute("""SELECT c.id, m.user1_id, m.user2_id FROM conversations c
+               JOIN matches m ON m.id = c.match_id WHERE c.id=%s""", (conversation_id,))
+        conv = cur.fetchone()
+        if not conv or user["id"] not in (conv["user1_id"], conv["user2_id"]):
+            cur.close(); c.close()
+            return RedirectResponse("/chats", 303)
+        cur.execute(
+            "INSERT INTO messages (conversation_id,sender_id,tipo,contenuto) VALUES (%s,%s,'sticker',%s)",
+            (conversation_id, user["id"], sticker),
+        )
+        try:
+            cur.execute("UPDATE conversations SET ultimo_messaggio_at=CURRENT_TIMESTAMP WHERE id=%s", (conversation_id,))
+        except Exception:
+            pass
+        altro = conv["user2_id"] if user["id"] == conv["user1_id"] else conv["user1_id"]
+        try:
+            cur.execute(
+                "INSERT INTO notifications (user_id,tipo,titolo,contenuto,related_id) VALUES (%s,'nuovo_messaggio',%s,%s,%s)",
+                (altro, f"Sticker da {user.get('nome') or 'utente'}", sticker, conversation_id),
+            )
+        except Exception:
+            pass
+        c.commit()
+        try:
+            await manager.send(altro, {"type": "nuovo_messaggio", "conversation_id": conversation_id, "preview": sticker})
+        except Exception:
+            pass
+    except Exception as e:
+        print("sticker:", e)
+        try: c.rollback()
+        except Exception: pass
+    cur.close(); c.close()
+    return RedirectResponse(f"/chat/{conversation_id}", 303)
+
+
+@app.post("/chat/{conversation_id}/gif")
+async def chat_gif(req: Request, conversation_id: int, gif_url: str = Form(...)):
+    """Invia GIF da URL (Giphy o altro)."""
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    gif_url = (gif_url or "").strip()
+    if not gif_url.startswith("http"):
+        return RedirectResponse(f"/chat/{conversation_id}", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute("""SELECT c.id, m.user1_id, m.user2_id FROM conversations c
+               JOIN matches m ON m.id = c.match_id WHERE c.id=%s""", (conversation_id,))
+        conv = cur.fetchone()
+        if not conv or user["id"] not in (conv["user1_id"], conv["user2_id"]):
+            cur.close(); c.close()
+            return RedirectResponse("/chats", 303)
+        try:
+            cur.execute(
+                """INSERT INTO messages (conversation_id,sender_id,tipo,contenuto,media_url,media_type)
+                   VALUES (%s,%s,'gif','GIF',%s,'gif')""",
+                (conversation_id, user["id"], gif_url[:500]),
+            )
+        except Exception:
+            c.rollback()
+            cur.execute(
+                "INSERT INTO messages (conversation_id,sender_id,tipo,contenuto) VALUES (%s,%s,'gif',%s)",
+                (conversation_id, user["id"], gif_url[:500]),
+            )
+        c.commit()
+        altro = conv["user2_id"] if user["id"] == conv["user1_id"] else conv["user1_id"]
+        try:
+            await manager.send(altro, {"type": "nuovo_messaggio", "conversation_id": conversation_id, "preview": "GIF"})
+        except Exception:
+            pass
+    except Exception as e:
+        print("gif:", e)
+        try: c.rollback()
+        except Exception: pass
+    cur.close(); c.close()
+    return RedirectResponse(f"/chat/{conversation_id}", 303)
+
+
+@app.get("/api/giphy")
+async def api_giphy(req: Request, q: str = "funny"):
+    """Proxy Giphy se GIPHY_API_KEY è settata, altrimenti sticker pack."""
+    import os, json
+    from urllib.request import urlopen, quote
+    key = (os.environ.get("GIPHY_API_KEY") or "").strip()
+    if not key:
+        return JSONResponse({"ok": True, "source": "stickers", "items": [
+            {"id": s["id"], "url": None, "label": s["label"]} for s in STICKERS
+        ]})
+    try:
+        url = f"https://api.giphy.com/v1/gifs/search?api_key={key}&q={quote(q)}&limit=20&rating=pg-13"
+        with urlopen(url, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+        items = []
+        for g in data.get("data") or []:
+            imgs = g.get("images") or {}
+            u = (imgs.get("fixed_height") or imgs.get("downsized") or {}).get("url")
+            if u:
+                items.append({"id": g.get("id"), "url": u, "label": g.get("title") or "GIF"})
+        return JSONResponse({"ok": True, "source": "giphy", "items": items})
+    except Exception as e:
+        print("giphy:", e)
+        return JSONResponse({"ok": False, "error": str(e), "items": []})
+
+
 @app.get("/spells", response_class=HTMLResponse)
 async def spells_page(req: Request):
     user = current_user(req)
@@ -5375,19 +5810,32 @@ async def spells_cast(req: Request, spell: str = Form(...)):
     if spell == "boost":
         if not spend_credits(user["id"], cost, "boost"):
             return RedirectResponse("/spells?err=crediti", 303)
-        # semplice: segna notification
         try:
             c = db()
             cur = c.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_boosts (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    starts_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP NOT NULL
+                )
+            """)
+            # 30 minuti di boost
             cur.execute(
-                "INSERT INTO notifications (user_id,tipo,titolo,contenuto) VALUES (%s,'boost','Boost attivo','Il tuo profilo e in evidenza!')",
+                """INSERT INTO user_boosts (user_id, expires_at)
+                   VALUES (%s, NOW() + interval '30 minutes')""",
+                (user["id"],),
+            )
+            cur.execute(
+                "INSERT INTO notifications (user_id,tipo,titolo,contenuto) VALUES (%s,'boost','Boost attivo','Il tuo profilo e in evidenza per 30 minuti!')",
                 (user["id"],),
             )
             c.commit()
             cur.close()
             c.close()
-        except Exception:
-            pass
+        except Exception as e:
+            print("boost activate:", e)
         return RedirectResponse("/spells?ok=boost", 303)
     return RedirectResponse("/spells", 303)
 

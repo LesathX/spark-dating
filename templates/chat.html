@@ -64,11 +64,23 @@
     <div class="flex items-center gap-2 px-3 py-2.5 border-b border-white/10 shrink-0">
       <button type="button" id="btn-list-mobile" class="md:hidden text-gray-400 text-xl px-1">☰</button>
       <a href="/chats" class="text-gray-400 text-xl md:hidden">←</a>
+      {% if photo_access != 'approved' and photo_access != 'pending' %}
+      <form method="post" action="/gallery/request-access/{{ altro.id }}">
+        <input type="hidden" name="conversation_id" value="{{ conversation_id }}">
+        <button class="w-full text-left px-4 py-3 hover:bg-white/5 border-b border-white/5">📷 Richiedi gallery ({{ photo_cost or 25 }} ✨)</button>
+      </form>
+      {% endif %}
       <a href="/u/{{ altro.id }}" class="w-10 h-10 rounded-full bg-gradient-to-br from-red-700 to-black flex items-center justify-center font-hot shrink-0">
         {{ (altro.nome or altro.username or '?')[0] | upper }}
       </a>
       <div class="min-w-0 flex-1">
-        <a href="/u/{{ altro.id }}" class="font-hot text-lg tracking-wide truncate block hover:text-[#ff0000]">
+        {% if photo_access != 'approved' and photo_access != 'pending' %}
+      <form method="post" action="/gallery/request-access/{{ altro.id }}">
+        <input type="hidden" name="conversation_id" value="{{ conversation_id }}">
+        <button class="w-full text-left px-4 py-3 hover:bg-white/5 border-b border-white/5">📷 Richiedi gallery ({{ photo_cost or 25 }} ✨)</button>
+      </form>
+      {% endif %}
+      <a href="/u/{{ altro.id }}" class="font-hot text-lg tracking-wide truncate block hover:text-[#ff0000]">
           {{ altro.nome or altro.username }}{% if altro.eta %}, {{ altro.eta }}{% endif %}
         </a>
         <div class="text-xs text-gray-500">@{{ altro.username or 'user' }}</div>
@@ -78,9 +90,15 @@
 
     <!-- Menu azioni -->
     <div id="more-menu" class="hidden absolute right-3 top-14 z-30 bg-[#111] border border-white/15 rounded-xl shadow-xl overflow-hidden text-sm w-48">
+      {% if photo_access != 'approved' and photo_access != 'pending' %}
+      <form method="post" action="/gallery/request-access/{{ altro.id }}">
+        <input type="hidden" name="conversation_id" value="{{ conversation_id }}">
+        <button class="w-full text-left px-4 py-3 hover:bg-white/5 border-b border-white/5">📷 Richiedi gallery ({{ photo_cost or 25 }} ✨)</button>
+      </form>
+      {% endif %}
       <a href="/u/{{ altro.id }}" class="block px-4 py-3 hover:bg-white/5 border-b border-white/5">👤 Profilo</a>
       <a href="/gifts/send/{{ altro.id }}?conversation_id={{ conversation_id }}" class="block px-4 py-3 hover:bg-white/5 border-b border-white/5">🎁 Invia dono</a>
-      <form method="post" action="/chat/{{ conversation_id }}/block" onsubmit="return confirm('Bloccare {{ altro.nome }}?')">
+      <form method="post" action="/chat/{{ conversation_id }}/block" onsubmit="return confirm('Bloccare {{ altro.nome }}{% if last_seen %}<div id="presence-text" class="text-[10px] text-gray-400 font-normal normal-case tracking-normal">{{ last_seen }}</div>{% endif %}?')">
         <button class="w-full text-left px-4 py-3 hover:bg-white/5 border-b border-white/5 text-red-400">🚫 Blocca</button>
       </form>
       <button type="button" id="btn-report-menu" class="w-full text-left px-4 py-3 hover:bg-white/5 text-yellow-400">⚠️ Segnala</button>
@@ -136,6 +154,11 @@
           {% if msg.reply_preview %}
           <div class="text-[10px] opacity-80 border-l-2 border-white/40 pl-2 mb-1 truncate">↩ {{ msg.reply_preview }}</div>
           {% endif %}
+          {% if msg.tipo == 'sticker' or (msg.contenuto and msg.contenuto|length <= 4 and not msg.media_url and msg.contenuto is string and msg.contenuto|length > 0 and msg.tipo == 'sticker') %}
+          <div class="text-4xl leading-none py-1">{{ msg.contenuto }}</div>
+          {% elif msg.tipo == 'gif' and (msg.media_url or msg.contenuto) %}
+          <img src="{{ msg.media_url or msg.contenuto }}" class="rounded-lg max-w-full max-h-48" alt="GIF">
+          {% else %}
           {% set murl = msg.media_url or '' %}
           {% set mtype = msg.media_type or msg.tipo or '' %}
           {% if murl %}
@@ -218,7 +241,8 @@
       </form>
       <button type="button" id="btn-report-bar" class="bg-white/5 border border-white/15 text-xs px-2.5 py-1.5 rounded-xl text-yellow-400">⚠️</button>
       <label class="bg-white/5 border border-white/15 text-xs px-2.5 py-1.5 rounded-xl cursor-pointer">
-        📷<input type="file" id="file-photo" accept="image/*" class="hidden">
+        <button type="button" id="btn-stickers" class="text-xl px-1" title="Stickers/GIF">😊</button>
+            📷<input type="file" id="file-photo" accept="image/*" class="hidden">
       </label>
       <label class="bg-white/5 border border-white/15 text-xs px-2.5 py-1.5 rounded-xl cursor-pointer">
         🎬<input type="file" id="file-video" accept="video/*" class="hidden">
@@ -584,5 +608,84 @@ document.querySelectorAll('[data-msg-id]').forEach(el => {
   });
 });
 </script>
+
+<script>
+(function() {
+  const uid = {{ user.id }};
+  const otherId = {{ altro.id }};
+  const convId = {{ conversation_id }};
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  let ws;
+  let typingTimer;
+  let lastTypingSent = 0;
+
+  function connect() {
+    try {
+      ws = new WebSocket(proto + '://' + location.host + '/ws/' + uid);
+      ws.onopen = () => {
+        setInterval(() => {
+          if (ws && ws.readyState === 1) ws.send(JSON.stringify({type: 'heartbeat'}));
+        }, 25000);
+      };
+      ws.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          if (data.type === 'typing' && data.conversation_id == convId) {
+            const el = document.getElementById('typing-indicator');
+            if (!el) return;
+            if (data.active) el.classList.remove('hidden');
+            else el.classList.add('hidden');
+          }
+          if (data.type === 'nuovo_messaggio' && data.conversation_id == convId) {
+            // soft refresh
+            location.reload();
+          }
+        } catch (e) {}
+      };
+      ws.onclose = () => setTimeout(connect, 3000);
+    } catch (e) {}
+  }
+  connect();
+
+  function sendTyping(active) {
+    if (!ws || ws.readyState !== 1) return;
+    const now = Date.now();
+    if (active && now - lastTypingSent < 1500) return;
+    lastTypingSent = now;
+    ws.send(JSON.stringify({
+      type: active ? 'typing' : 'typing_stop',
+      to_user_id: otherId,
+      conversation_id: convId
+    }));
+  }
+
+  const input = document.querySelector('#form-send textarea, #form-send input[name=contenuto], textarea[name=contenuto], input[name=contenuto]');
+  if (input) {
+    input.addEventListener('input', () => {
+      sendTyping(true);
+      clearTimeout(typingTimer);
+      typingTimer = setTimeout(() => sendTyping(false), 2000);
+    });
+  }
+
+  document.getElementById('btn-stickers')?.addEventListener('click', () => {
+    document.getElementById('sticker-panel')?.classList.toggle('hidden');
+  });
+
+  window.sendGifUrl = function() {
+    const u = document.getElementById('gif-url')?.value?.trim();
+    if (!u) return;
+    const f = document.createElement('form');
+    f.method = 'POST';
+    f.action = '/chat/' + convId + '/gif';
+    const i = document.createElement('input');
+    i.name = 'gif_url'; i.value = u;
+    f.appendChild(i);
+    document.body.appendChild(f);
+    f.submit();
+  };
+})();
+</script>
+
 </body>
 </html>

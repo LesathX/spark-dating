@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Storie – MyCheating</title>
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background:#0a0a0a; font-family:'Oswald',sans-serif; }
+    .font-hot { font-family:'Bebas Neue',sans-serif; letter-spacing:1px; }
+    .ring-story { box-shadow: 0 0 0 2px #ff0000; }
+  </style>
+</head>
+<body class="text-white min-h-screen pb-24">
+  <div class="max-w-md mx-auto px-4 py-4">
+    <div class="flex items-center justify-between mb-4">
+      <h1 class="font-hot text-3xl tracking-wide text-[#ff0000]">STORIE</h1>
+      <a href="/discover" class="text-sm text-gray-400">← Scopri</a>
+    </div>
+    <p class="text-xs text-gray-500 mb-4">Visibili 24 ore · foto o video</p>
+
+    {% if request.query_params.get('ok') %}
+    <div class="mb-3 text-sm text-green-400">✅ Storia pubblicata</div>
+    {% endif %}
+
+    <!-- Crea -->
+    <form method="post" action="/stories/create" enctype="multipart/form-data"
+          class="border border-white/10 rounded-2xl p-4 mb-6 space-y-3 bg-black/40">
+      <div class="font-semibold text-sm">La tua storia</div>
+      <input type="file" name="file" accept="image/*,video/*" required
+             class="w-full text-xs text-gray-400">
+      <input name="caption" placeholder="Didascalia (opzionale)" maxlength="200"
+             class="w-full bg-black border border-white/15 rounded-xl px-3 py-2 text-sm">
+      <button class="w-full bg-[#ff0000] py-2.5 rounded-xl text-sm font-semibold">Pubblica · 24h</button>
+    </form>
+
+    {% if my_stories %}
+    <h2 class="text-xs text-gray-500 mb-2">LE TUE (attive)</h2>
+    <div class="flex gap-3 overflow-x-auto pb-3 mb-4">
+      {% for s in my_stories %}
+      <div class="shrink-0 w-24">
+        {% if s.media_type == 'video' %}
+        <video src="{{ s.media_url }}" class="w-24 h-36 object-cover rounded-xl ring-story"></video>
+        {% else %}
+        <img src="{{ s.media_url }}" class="w-24 h-36 object-cover rounded-xl ring-story" alt="">
+        {% endif %}
+        <form method="post" action="/stories/delete/{{ s.id }}" class="mt-1">
+          <button class="text-[10px] text-red-400 w-full">Elimina</button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <h2 class="text-xs text-gray-500 mb-2">DI TUTTI</h2>
+    {% if groups %}
+    <div class="space-y-4">
+      {% for g in groups %}
+      <div class="border border-white/10 rounded-2xl p-3">
+        <div class="flex items-center gap-2 mb-2">
+          <div class="w-10 h-10 rounded-full ring-story bg-white/10 flex items-center justify-center font-hot">
+            {{ (g.user.nome or '?')[0]|upper }}
+          </div>
+          <div>
+            <div class="font-semibold text-sm">{{ g.user.nome }}</div>
+            <div class="text-[10px] text-gray-500">{{ g.items|length }} storie</div>
+          </div>
+          <a href="/u/{{ g.user.user_id }}" class="ml-auto text-xs text-[#ff0000]">Profilo</a>
+        </div>
+        <div class="flex gap-2 overflow-x-auto">
+          {% for s in g.items %}
+          <a href="{{ s.media_url }}" target="_blank" class="shrink-0">
+            {% if s.media_type == 'video' %}
+            <video src="{{ s.media_url }}" class="w-28 h-40 object-cover rounded-xl"></video>
+            {% else %}
+            <img src="{{ s.media_url }}" class="w-28 h-40 object-cover rounded-xl" alt="">
+            {% endif %}
+          </a>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-gray-500 text-sm text-center py-8">Nessuna storia attiva. Pubblicane una!</p>
+    {% endif %}
+  </div>
+
+  <nav class="fixed bottom-0 left-0 right-0 bg-black/95 border-t border-white/10 px-2 py-2 flex justify-around text-[10px] z-40">
+    <a href="/discover" class="text-gray-400 text-center">🔥<br>Scopri</a>
+    <a href="/stories" class="text-[#ff0000] text-center">⭕<br>Storie</a>
+    <a href="/chats" class="text-gray-400 text-center">💬<br>Chat</a>
+    <a href="/profile" class="text-gray-400 text-center">👤<br>Tu</a>
+  </nav>
+</body>
+</html>

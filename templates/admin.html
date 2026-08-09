@@ -290,19 +290,39 @@
         </table>
       </div>
 
-      <!-- ========== MESSAGGI ========== -->
+            <!-- ========== MESSAGGI ========== -->
       {% elif tab == 'messages' %}
       <h1 class="font-hot text-4xl tracking-wide mb-2">MESSAGGI</h1>
-      <p class="text-gray-500 text-sm mb-6">Tutte le conversazioni private</p>
+      <p class="text-gray-500 text-sm mb-4">Tutte le conversazioni — cerca una parola in tutti i messaggi</p>
+      <form method="get" action="/admin" class="flex gap-2 mb-4">
+        <input type="hidden" name="tab" value="messages">
+        <input type="text" name="mq" value="{{ mq or '' }}" placeholder="Cerca parola nei messaggi..." class="flex-1 rounded-lg px-4 py-2.5 text-sm">
+        <button class="bg-[#ff0000] px-5 py-2.5 rounded-lg font-semibold text-sm">CERCA</button>
+        {% if mq %}<a href="/admin?tab=messages" class="border border-white/20 px-4 py-2.5 rounded-lg text-sm text-gray-400">✕</a>{% endif %}
+      </form>
+      {% if mq %}
+      <p class="text-xs text-gray-500 mb-3">Risultati per «{{ mq }}»: {{ message_hits|length if message_hits else 0 }} messaggi · {{ conversations|length }} chat</p>
+      {% if message_hits %}
+      <div class="border border-white/10 rounded-xl mb-4 max-h-48 overflow-y-auto">
+        {% for h in message_hits %}
+        <a href="/admin?tab=messages&mq={{ mq }}&conv={{ h.conversation_id }}" class="block px-4 py-2.5 border-b border-white/5 hover:bg-white/5 text-sm">
+          <span class="text-[#ff0000] text-xs font-semibold">{{ h.sender_nome }}</span>
+          <span class="text-gray-600 text-[10px]">in {{ h.nome1 }} ↔ {{ h.nome2 }}</span>
+          <div class="text-gray-300 truncate">{{ h.contenuto }}</div>
+        </a>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% endif %}
       <div class="grid md:grid-cols-2 gap-4">
         <div class="border border-white/10 rounded-xl overflow-hidden max-h-[70vh] overflow-y-auto">
           {% for c in conversations %}
-          <a href="/admin?tab=messages&conv={{ c.id }}" class="block px-4 py-3 border-b border-white/5 hover:bg-white/5 {% if open_conversation and open_conversation.id == c.id %}bg-[#ff0000]/10{% endif %}">
+          <a href="/admin?tab=messages{% if mq %}&mq={{ mq }}{% endif %}&conv={{ c.id }}" class="block px-4 py-3 border-b border-white/5 hover:bg-white/5 {% if open_conversation and open_conversation.id == c.id %}bg-[#ff0000]/10{% endif %}">
             <div class="font-semibold text-sm">{{ c.nome1 }} ↔ {{ c.nome2 }}</div>
-            <div class="text-[10px] text-gray-500">ID {{ c.id }}</div>
+            <div class="text-[10px] text-gray-500 truncate">{{ c.last_message or ('ID '~c.id) }}</div>
           </a>
           {% else %}
-          <p class="p-6 text-gray-500 text-sm">Nessuna conversazione</p>
+          <p class="p-6 text-gray-500 text-sm">{% if mq %}Nessuna chat con questa parola{% else %}Nessuna conversazione{% endif %}</p>
           {% endfor %}
         </div>
         <div class="border border-white/10 rounded-xl p-4 max-h-[70vh] overflow-y-auto">
@@ -315,7 +335,7 @@
             <div class="text-gray-300">{{ m.contenuto }}</div>
           </div>
           {% else %}
-          <p class="text-gray-500 text-sm">Nessun messaggio</p>
+          <p class="text-gray-500 text-sm">Nessun messaggio{% if mq %} con «{{ mq }}»{% endif %}</p>
           {% endfor %}
           {% else %}
           <p class="text-gray-500 text-sm">Seleziona una conversazione</p>
@@ -323,7 +343,7 @@
         </div>
       </div>
 
-      <!-- ========== FOTO ========== -->
+<!-- ========== FOTO ========== -->
       {% elif tab == 'foto' %}
       <h1 class="font-hot text-4xl tracking-wide mb-2">FOTO</h1>
       <p class="text-gray-500 text-sm mb-6">Cartelle per proprietario — clicca una cartella per vedere i media</p>
@@ -532,6 +552,104 @@
         <p class="text-xs text-gray-600 mt-2">Utenti · Messaggi · Doni · Match · Foto · Notifiche · Blocchi</p>
       </div>
       {% endif %}
+
+
+      <!-- ========== BOT ========== -->
+      {% elif tab == 'bot' %}
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div>
+          <h1 class="font-hot text-4xl tracking-wide">BOT</h1>
+          <p class="text-gray-500 text-sm">Profili automatici — aggiungi, modifica, elimina</p>
+        </div>
+      </div>
+      {% if request.query_params.get('ok') %}
+      <div class="mb-4 bg-green-500/20 border border-green-500/40 text-green-300 text-center py-2 rounded-xl text-sm">Operazione bot completata</div>
+      {% endif %}
+      {% if request.query_params.get('err') %}
+      <div class="mb-4 bg-red-500/20 border border-red-500 text-red-300 text-center py-2 rounded-xl text-sm">Errore operazione bot</div>
+      {% endif %}
+
+      <div class="border border-white/10 rounded-2xl p-4 mb-6 bg-white/[0.03]">
+        <div class="font-hot text-lg mb-3 text-[#ff0000]">+ NUOVO BOT</div>
+        <form method="post" action="/admin/bots/create" class="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <div>
+            <label class="text-[10px] text-gray-500">NOME *</label>
+            <input name="nome" required class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
+          </div>
+          <div>
+            <label class="text-[10px] text-gray-500">USERNAME</label>
+            <input name="username" placeholder="bot_nome" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
+          </div>
+          <div>
+            <label class="text-[10px] text-gray-500">EMAIL</label>
+            <input name="email" type="email" placeholder="auto se vuoto" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
+          </div>
+          <div>
+            <label class="text-[10px] text-gray-500">PASSWORD</label>
+            <input name="password" value="bot1234" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
+          </div>
+          <div>
+            <label class="text-[10px] text-gray-500">GENERE</label>
+            <select name="genere" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
+              <option value="donna">Donna</option>
+              <option value="uomo">Uomo</option>
+              <option value="altro">Altro</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-[10px] text-gray-500">CITTÀ</label>
+            <input name="citta" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
+          </div>
+          <div class="md:col-span-2">
+            <label class="text-[10px] text-gray-500">BIO</label>
+            <input name="bio" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
+          </div>
+          <div>
+            <label class="text-[10px] text-gray-500">CREDITI</label>
+            <input name="credits" type="number" value="50" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
+          </div>
+          <div class="md:col-span-3">
+            <button type="submit" class="bg-[#ff0000] text-white font-semibold px-6 py-2.5 rounded-lg text-sm shadow-[0_0_16px_rgba(255,0,0,0.3)]">CREA BOT</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="space-y-3">
+        {% for b in bots %}
+        <form method="post" action="/admin/bots/{{ b.id }}/update" class="border border-white/10 rounded-xl p-4 space-y-3">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center text-xl">🤖</div>
+            <div class="flex-1">
+              <div class="text-xs text-gray-500">ID {{ b.id }} · @{{ b.username }}</div>
+              <div class="text-xs text-gray-600">{{ b.email }}</div>
+            </div>
+            <span class="text-[10px] {% if b.stato == 'attivo' %}text-green-400{% else %}text-red-400{% endif %}">{{ b.stato or 'attivo' }}</span>
+          </div>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <input name="nome" value="{{ b.nome or '' }}" class="rounded-lg px-3 py-2 text-sm bg-black border border-white/15" placeholder="Nome">
+            <input name="username" value="{{ b.username or '' }}" class="rounded-lg px-3 py-2 text-sm bg-black border border-white/15" placeholder="Username">
+            <input name="citta" value="{{ b.citta or '' }}" class="rounded-lg px-3 py-2 text-sm bg-black border border-white/15" placeholder="Città">
+            <input name="credits" type="number" value="{{ b.credits or 0 }}" class="rounded-lg px-3 py-2 text-sm bg-black border border-white/15" placeholder="Crediti">
+            <select name="genere" class="rounded-lg px-3 py-2 text-sm bg-black border border-white/15">
+              <option value="donna" {% if b.genere == 'donna' %}selected{% endif %}>Donna</option>
+              <option value="uomo" {% if b.genere == 'uomo' %}selected{% endif %}>Uomo</option>
+              <option value="altro" {% if b.genere == 'altro' or not b.genere %}selected{% endif %}>Altro</option>
+            </select>
+            <select name="stato" class="rounded-lg px-3 py-2 text-sm bg-black border border-white/15">
+              <option value="attivo" {% if b.stato == 'attivo' or not b.stato %}selected{% endif %}>Attivo</option>
+              <option value="bannato" {% if b.stato == 'bannato' %}selected{% endif %}>Bannato</option>
+            </select>
+            <input name="bio" value="{{ b.bio or '' }}" class="md:col-span-2 rounded-lg px-3 py-2 text-sm bg-black border border-white/15" placeholder="Bio">
+          </div>
+          <div class="flex gap-2">
+            <button type="submit" class="bg-[#ff0000] text-white text-xs font-semibold px-4 py-2 rounded-lg">SALVA</button>
+            <button type="submit" formaction="/admin/bots/{{ b.id }}/delete" onclick="return confirm('Eliminare bot {{ b.nome }}?')" class="border border-red-500/40 text-red-400 text-xs px-4 py-2 rounded-lg">ELIMINA</button>
+          </div>
+        </form>
+        {% else %}
+        <p class="text-gray-500 text-sm py-6 text-center">Nessun bot. Creane uno sopra. (Esegui SQL: ALTER TABLE users ADD COLUMN IF NOT EXISTS is_bot INTEGER DEFAULT 0)</p>
+        {% endfor %}
+      </div>
 
       <!-- ========== PLACEHOLDER SEZIONI ========== -->
       {% else %}

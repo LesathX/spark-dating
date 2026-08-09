@@ -1382,6 +1382,9 @@ async def admin_panel(req: Request):
 
     tab = req.query_params.get("tab") or "users"
     q = (req.query_params.get("q") or "").strip()
+    mq = (req.query_params.get("mq") or "").strip()
+    message_hits = []
+    bots = []
     filter_stato = req.query_params.get("filter") or "tutti"
 
     c = db()
@@ -1445,22 +1448,60 @@ async def admin_panel(req: Request):
     conversations = []
     open_conversation = None
     thread_messages = []
+    mq = (req.query_params.get("mq") or "").strip()
+    message_hits = []
+
     if tab == "messages":
         try:
-            cur.execute("""
-                SELECT c.id, c.ultimo_messaggio_at, m.data_match,
-                       m.user1_id, m.user2_id,
-                       u1.nome as nome1, u2.nome as nome2,
-                       (SELECT COUNT(*) FROM messages msg WHERE msg.conversation_id = c.id AND COALESCE(msg.eliminato,0)=0) as msg_count,
-                       (SELECT msg.contenuto FROM messages msg WHERE msg.conversation_id = c.id AND COALESCE(msg.eliminato,0)=0 ORDER BY msg.data_invio DESC LIMIT 1) as last_message
-                FROM conversations c
-                JOIN matches m ON m.id = c.match_id
-                JOIN users u1 ON u1.id = m.user1_id
-                JOIN users u2 ON u2.id = m.user2_id
-                ORDER BY COALESCE(c.ultimo_messaggio_at, m.data_match) DESC
-                LIMIT 200
-            """)
-            conversations = [dict(r) for r in cur.fetchall()]
+            if mq:
+                like = f"%{mq}%"
+                # conversazioni che contengono la parola
+                cur.execute("""
+                    SELECT DISTINCT c.id, c.ultimo_messaggio_at, m.data_match,
+                           m.user1_id, m.user2_id,
+                           u1.nome as nome1, u2.nome as nome2,
+                           (SELECT COUNT(*) FROM messages msg WHERE msg.conversation_id = c.id) as msg_count,
+                           (SELECT msg.contenuto FROM messages msg WHERE msg.conversation_id = c.id ORDER BY msg.id DESC LIMIT 1) as last_message
+                    FROM conversations c
+                    JOIN matches m ON m.id = c.match_id
+                    JOIN users u1 ON u1.id = m.user1_id
+                    JOIN users u2 ON u2.id = m.user2_id
+                    JOIN messages msg ON msg.conversation_id = c.id
+                    WHERE msg.contenuto ILIKE %s
+                    ORDER BY COALESCE(c.ultimo_messaggio_at, m.data_match) DESC
+                    LIMIT 200
+                """, (like,))
+                conversations = [dict(r) for r in cur.fetchall()]
+                # elenco messaggi che matchano
+                cur.execute("""
+                    SELECT msg.id, msg.contenuto, msg.conversation_id, msg.data_invio, msg.sender_id,
+                           u.nome as sender_nome, u1.nome as nome1, u2.nome as nome2
+                    FROM messages msg
+                    JOIN users u ON u.id = msg.sender_id
+                    JOIN conversations c ON c.id = msg.conversation_id
+                    JOIN matches m ON m.id = c.match_id
+                    JOIN users u1 ON u1.id = m.user1_id
+                    JOIN users u2 ON u2.id = m.user2_id
+                    WHERE msg.contenuto ILIKE %s
+                    ORDER BY msg.id DESC
+                    LIMIT 100
+                """, (like,))
+                message_hits = [dict(r) for r in cur.fetchall()]
+            else:
+                cur.execute("""
+                    SELECT c.id, c.ultimo_messaggio_at, m.data_match,
+                           m.user1_id, m.user2_id,
+                           u1.nome as nome1, u2.nome as nome2,
+                           (SELECT COUNT(*) FROM messages msg WHERE msg.conversation_id = c.id AND COALESCE(msg.eliminato,0)=0) as msg_count,
+                           (SELECT msg.contenuto FROM messages msg WHERE msg.conversation_id = c.id AND COALESCE(msg.eliminato,0)=0 ORDER BY msg.data_invio DESC LIMIT 1) as last_message
+                    FROM conversations c
+                    JOIN matches m ON m.id = c.match_id
+                    JOIN users u1 ON u1.id = m.user1_id
+                    JOIN users u2 ON u2.id = m.user2_id
+                    ORDER BY COALESCE(c.ultimo_messaggio_at, m.data_match) DESC
+                    LIMIT 200
+                """)
+                conversations = [dict(r) for r in cur.fetchall()]
 
             conv_id = req.query_params.get("conv")
             if conv_id:
@@ -1480,13 +1521,24 @@ async def admin_panel(req: Request):
                     row = cur.fetchone()
                     if row:
                         open_conversation = dict(row)
-                        cur.execute("""
-                            SELECT m.id, m.sender_id, m.contenuto, m.data_invio, u.nome as sender_nome
-                            FROM messages m
-                            JOIN users u ON u.id = m.sender_id
-                            WHERE m.conversation_id = %s AND COALESCE(m.eliminato,0)=0
-                            ORDER BY m.data_invio ASC
-                        """, (conv_id,))
+                        if mq:
+                            like = f"%{mq}%"
+                            cur.execute("""
+                                SELECT m.id, m.sender_id, m.contenuto, m.data_invio, u.nome as sender_nome
+                                FROM messages m
+                                JOIN users u ON u.id = m.sender_id
+                                WHERE m.conversation_id = %s AND COALESCE(m.eliminato,0)=0
+                                  AND m.contenuto ILIKE %s
+                                ORDER BY m.data_invio ASC
+                            """, (conv_id, like))
+                        else:
+                            cur.execute("""
+                                SELECT m.id, m.sender_id, m.contenuto, m.data_invio, u.nome as sender_nome
+                                FROM messages m
+                                JOIN users u ON u.id = m.sender_id
+                                WHERE m.conversation_id = %s AND COALESCE(m.eliminato,0)=0
+                                ORDER BY m.data_invio ASC
+                            """, (conv_id,))
                         thread_messages = [dict(r) for r in cur.fetchall()]
         except Exception as e:
             print("admin messages error:", e)
@@ -1511,6 +1563,7 @@ async def admin_panel(req: Request):
         online_users = [dict(r) for r in cur.fetchall()]
 
     gallery_items = []
+    bots = []
     gallery_folders = []
     folder_user_id = None
     folder_user = None
@@ -1626,6 +1679,36 @@ async def admin_panel(req: Request):
                 print("admin blocks2:", e2)
 
     search_results = []  # lista globale {tipo, titolo, sottotitolo, link, meta}
+
+
+    if tab == "bot":
+        try:
+            cur.execute("""
+                SELECT id, nome, username, email, stato, credits, bio, citta, genere,
+                       data_nascita, foto_principale_url, is_online, COALESCE(is_bot,1) as is_bot
+                FROM users
+                WHERE COALESCE(is_bot,0)=1
+                ORDER BY id DESC LIMIT 200
+            """)
+            bots = [dict(r) for r in cur.fetchall()]
+            for b in bots:
+                try:
+                    b["eta"] = eta(b.get("data_nascita"))
+                except Exception:
+                    b["eta"] = None
+        except Exception as e:
+            print("admin bots (is_bot col?):", e)
+            try:
+                cur.execute("""
+                    SELECT id, nome, username, email, stato, credits, bio, citta, genere, data_nascita, foto_principale_url
+                    FROM users
+                    WHERE email LIKE '%@bot.mycheating%' OR username LIKE 'bot_%'
+                    ORDER BY id DESC LIMIT 200
+                """)
+                bots = [dict(r) for r in cur.fetchall()]
+            except Exception as e2:
+                print("admin bots2:", e2)
+                bots = []
 
     if tab == "ricerca" and q:
         like = f"%{q}%"
@@ -1848,11 +1931,146 @@ async def admin_panel(req: Request):
         "gift_types": gift_types,
         "gifts_recent": gifts_recent,
         "blocks": blocks,
+        "bots": bots,
+        "mq": mq,
+        "message_hits": message_hits,
         "search_results": search_results,
     })
 
 
 
+
+
+
+@app.post("/admin/bots/create")
+async def admin_bot_create(req: Request):
+    if not require_admin(req):
+        return RedirectResponse("/login", 303)
+    form = await req.form()
+    nome = (form.get("nome") or "").strip()
+    username = (form.get("username") or "").strip()
+    email = (form.get("email") or "").strip().lower()
+    password = (form.get("password") or "bot1234").strip()
+    genere = form.get("genere") or "altro"
+    citta = (form.get("citta") or "").strip() or None
+    bio = (form.get("bio") or "").strip() or None
+    try:
+        credits = int(form.get("credits") or 50)
+    except Exception:
+        credits = 50
+    if not nome:
+        return RedirectResponse("/admin?tab=bot&err=nome", 303)
+    if not username:
+        username = "bot_" + nome.lower().replace(" ", "_")[:20]
+    if not email:
+        email = f"{username}@bot.mycheating.local"
+    from datetime import date
+    data_nascita = date(date.today().year - 25, 1, 1).isoformat()
+    pwd_hash = hash_pw(password)
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute("SELECT id FROM users WHERE email=%s OR username=%s", (email, username))
+        if cur.fetchone():
+            cur.close()
+            c.close()
+            return RedirectResponse("/admin?tab=bot&err=esiste", 303)
+        try:
+            cur.execute(
+                """INSERT INTO users (email, password_hash, username, nome, data_nascita, genere, orientamento, bio, citta, credits, stato, is_bot)
+                   VALUES (%s,%s,%s,%s,%s,%s,'tutti',%s,%s,%s,'attivo',1) RETURNING id""",
+                (email, pwd_hash, username, nome, data_nascita, genere, bio, citta, credits),
+            )
+        except Exception:
+            c.rollback()
+            cur.execute(
+                """INSERT INTO users (email, password_hash, username, nome, data_nascita, genere, orientamento, bio, citta)
+                   VALUES (%s,%s,%s,%s,%s,%s,'tutti',%s,%s) RETURNING id""",
+                (email, pwd_hash, username, nome, data_nascita, genere, bio, citta),
+            )
+        new_id = cur.fetchone()["id"]
+        try:
+            cur.execute("UPDATE users SET is_bot=1, credits=%s WHERE id=%s", (credits, new_id))
+        except Exception:
+            pass
+        try:
+            cur.execute("INSERT INTO user_preferences (user_id) VALUES (%s)", (new_id,))
+        except Exception:
+            pass
+        c.commit()
+        cur.close()
+        c.close()
+        return RedirectResponse(f"/admin?tab=bot&ok=created&id={new_id}", 303)
+    except Exception as e:
+        c.rollback()
+        cur.close()
+        c.close()
+        print("bot create:", e)
+        return RedirectResponse("/admin?tab=bot&err=db", 303)
+
+
+@app.post("/admin/bots/{bot_id}/update")
+async def admin_bot_update(req: Request, bot_id: int):
+    if not require_admin(req):
+        return RedirectResponse("/login", 303)
+    form = await req.form()
+    nome = (form.get("nome") or "").strip()
+    username = (form.get("username") or "").strip()
+    bio = (form.get("bio") or "").strip() or None
+    citta = (form.get("citta") or "").strip() or None
+    genere = form.get("genere") or None
+    stato = form.get("stato") or "attivo"
+    try:
+        credits = int(form.get("credits") or 0)
+    except Exception:
+        credits = 0
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute(
+            """UPDATE users SET nome=%s, username=%s, bio=%s, citta=%s, genere=%s, stato=%s, credits=%s
+               WHERE id=%s""",
+            (nome, username, bio, citta, genere, stato, credits, bot_id),
+        )
+        c.commit()
+    except Exception as e:
+        c.rollback()
+        print("bot update:", e)
+        return RedirectResponse("/admin?tab=bot&err=update", 303)
+    finally:
+        cur.close()
+        c.close()
+    return RedirectResponse("/admin?tab=bot&ok=updated", 303)
+
+
+@app.post("/admin/bots/{bot_id}/delete")
+async def admin_bot_delete(req: Request, bot_id: int):
+    if not require_admin(req):
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        # non cancellare admin reali
+        cur.execute("SELECT COALESCE(is_admin,0) as is_admin, COALESCE(is_bot,0) as is_bot, email FROM users WHERE id=%s", (bot_id,))
+        row = cur.fetchone()
+        if not row:
+            cur.close()
+            c.close()
+            return RedirectResponse("/admin?tab=bot", 303)
+        if row["is_admin"] and not row["is_bot"]:
+            cur.close()
+            c.close()
+            return RedirectResponse("/admin?tab=bot&err=admin", 303)
+        cur.execute("DELETE FROM users WHERE id=%s", (bot_id,))
+        c.commit()
+    except Exception as e:
+        c.rollback()
+        print("bot delete:", e)
+        return RedirectResponse("/admin?tab=bot&err=delete", 303)
+    finally:
+        cur.close()
+        c.close()
+    return RedirectResponse("/admin?tab=bot&ok=deleted", 303)
 
 @app.post("/admin/gifts/create")
 async def admin_gift_create(req: Request):

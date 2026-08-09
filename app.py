@@ -761,100 +761,190 @@ async def chat_page(req: Request, conversation_id: int):
     user = current_user(req)
     if not user:
         return RedirectResponse("/login", 303)
+
+    altro = None
+    messaggi = []
+    photo_access = None
+    pending_request = None
+
     try:
         c = db()
         cur = c.cursor()
-        cur.execute("""SELECT c.id, m.user1_id, m.user2_id FROM conversations c
-               JOIN matches m ON m.id = c.match_id WHERE c.id=%s""", (conversation_id,))
-        conv = cur.fetchone()
-        if not conv or user["id"] not in (conv["user1_id"], conv["user2_id"]):
+    except Exception as e:
+        print("chat db connect:", e)
+        return RedirectResponse("/chats?err=chat", 303)
+
+    try:
+        # 1) conversazione + match
+        try:
+            cur.execute(
+                """SELECT c.id as cid, m.user1_id, m.user2_id
+                   FROM conversations c
+                   JOIN matches m ON m.id = c.match_id
+                   WHERE c.id=%s""",
+                (conversation_id,),
+            )
+            conv = cur.fetchone()
+        except Exception as e:
+            print("chat conv query:", e)
             cur.close()
             c.close()
             return RedirectResponse("/chats", 303)
-        altro_id = conv["user2_id"] if user["id"] == conv["user1_id"] else conv["user1_id"]
-        cur.execute("SELECT * FROM users WHERE id=%s", (altro_id,))
-        row_altro = cur.fetchone()
-        if not row_altro:
+
+        if not conv:
             cur.close()
             c.close()
             return RedirectResponse("/chats", 303)
-        altro = dict(row_altro)
+
+        u1, u2 = conv["user1_id"], conv["user2_id"]
+        if user["id"] not in (u1, u2):
+            cur.close()
+            c.close()
+            return RedirectResponse("/chats", 303)
+
+        altro_id = u2 if user["id"] == u1 else u1
+
+        # 2) altro utente
+        try:
+            cur.execute("SELECT * FROM users WHERE id=%s", (altro_id,))
+            row = cur.fetchone()
+            if not row:
+                cur.close()
+                c.close()
+                return RedirectResponse("/chats", 303)
+            altro = dict(row)
+        except Exception as e:
+            print("chat altro:", e)
+            cur.close()
+            c.close()
+            return RedirectResponse("/chats", 303)
+
         try:
             altro["eta"] = eta(altro.get("data_nascita"))
         except Exception:
             altro["eta"] = None
+        if not altro.get("nome"):
+            altro["nome"] = altro.get("username") or "Utente"
+        if not altro.get("username"):
+            altro["username"] = "user"
 
-        messaggi = []
-        try:
-            cur.execute("""SELECT m.*, u.nome FROM messages m JOIN users u ON u.id=m.sender_id
-                   WHERE m.conversation_id=%s AND COALESCE(m.eliminato,0)=0 ORDER BY m.data_invio""", (conversation_id,))
-            messaggi = cur.fetchall()
-        except Exception as e:
-            print("chat messages query:", e)
-            try:
-                c.rollback()
-                cur.execute("""SELECT m.*, u.nome FROM messages m JOIN users u ON u.id=m.sender_id
-                       WHERE m.conversation_id=%s ORDER BY m.id""", (conversation_id,))
-                messaggi = cur.fetchall()
-            except Exception as e2:
-                print("chat messages fallback:", e2)
-                c.rollback()
-                messaggi = []
-
+        # 3) messaggi (query minimali)
+        rows = []
         try:
             cur.execute(
-                "UPDATE messages SET letto=1 WHERE conversation_id=%s AND sender_id!=%s AND COALESCE(letto,0)=0",
+                """SELECT id, conversation_id, sender_id, contenuto, data_invio
+                   FROM messages WHERE conversation_id=%s ORDER BY id ASC LIMIT 500""",
+                (conversation_id,),
+            )
+            rows = cur.fetchall()
+        except Exception as e:
+            print("chat msgs simple:", e)
+            try:
+                c.rollback()
+                cur.execute(
+                    "SELECT * FROM messages WHERE conversation_id=%s ORDER BY id ASC LIMIT 500",
+                    (conversation_id,),
+                )
+                rows = cur.fetchall()
+            except Exception as e2:
+                print("chat msgs *:", e2)
+                c.rollback()
+                rows = []
+
+        for r in rows:
+            d = dict(r)
+            di = d.get("data_invio")
+            ora = ""
+            if di is not None:
+                try:
+                    if hasattr(di, "strftime"):
+                        ora = di.strftime("%H:%M")
+                    else:
+                        s = str(di)
+                        # "2026-08-09 12:30:00" or iso
+                        if "T" in s:
+                            ora = s.split("T")[1][:5]
+                        elif " " in s:
+                            ora = s.split(" ")[1][:5]
+                        else:
+                            ora = s[:5]
+                except Exception:
+                    ora = ""
+            d["ora"] = ora
+            d["data_invio"] = ora
+            messaggi.append(d)
+
+        # 4) mark read (optional)
+        try:
+            cur.execute(
+                "UPDATE messages SET letto=1 WHERE conversation_id=%s AND sender_id!=%s",
                 (conversation_id, user["id"]),
             )
             c.commit()
-        except Exception as e:
-            c.rollback()
-            print("chat mark read:", e)
-
-        cur.close()
-        c.close()
-
-        photo_access = None
-        pending_request = None
-        try:
-            c2 = db()
-            cur2 = c2.cursor()
-            cur2.execute(
-                "SELECT * FROM photo_access_requests WHERE from_user_id=%s AND to_user_id=%s",
-                (user["id"], altro["id"]),
-            )
-            out_req = cur2.fetchone()
-            cur2.execute(
-                "SELECT * FROM photo_access_requests WHERE from_user_id=%s AND to_user_id=%s AND status='pending'",
-                (altro["id"], user["id"]),
-            )
-            in_req = cur2.fetchone()
-            if out_req:
-                photo_access = out_req["status"]
-            if in_req:
-                pending_request = dict(in_req)
-            cur2.close()
-            c2.close()
-        except Exception as e:
-            print("chat photo state:", e)
-
-        msgs = []
-        for m in messaggi:
+        except Exception:
             try:
-                msgs.append(dict(m))
+                c.rollback()
             except Exception:
                 pass
 
+        # 5) photo access (optional)
+        try:
+            cur.execute(
+                "SELECT * FROM photo_access_requests WHERE from_user_id=%s AND to_user_id=%s",
+                (user["id"], altro["id"]),
+            )
+            out_req = cur.fetchone()
+            cur.execute(
+                "SELECT * FROM photo_access_requests WHERE from_user_id=%s AND to_user_id=%s AND status='pending'",
+                (altro["id"], user["id"]),
+            )
+            in_req = cur.fetchone()
+            if out_req:
+                photo_access = out_req.get("status") if isinstance(out_req, dict) else out_req["status"]
+            if in_req:
+                pending_request = dict(in_req)
+        except Exception as e:
+            print("chat photo optional:", e)
+            try:
+                c.rollback()
+            except Exception:
+                pass
+
+        cur.close()
+        c.close()
+    except Exception as e:
+        print("chat_page body:", type(e).__name__, e)
+        try:
+            cur.close()
+            c.close()
+        except Exception:
+            pass
+        return RedirectResponse("/chats?err=chat", 303)
+
+    if not altro:
+        return RedirectResponse("/chats", 303)
+
+    try:
+        ur = unread_count(user["id"])
+    except Exception:
+        ur = 0
+
+    try:
         return templates.TemplateResponse("chat.html", {
-            "request": req, "user": user, "altro": altro, "conversation_id": conversation_id,
-            "messaggi": msgs, "unread": unread_count(user["id"]),
+            "request": req,
+            "user": user,
+            "altro": altro,
+            "conversation_id": conversation_id,
+            "messaggi": messaggi,
+            "unread": ur,
             "photo_access": photo_access,
             "pending_request": pending_request,
-            "photo_cost": PHOTO_ACCESS_COST if "PHOTO_ACCESS_COST" in dir() else 25,
+            "photo_cost": 25,
         })
     except Exception as e:
-        print("chat_page error:", type(e).__name__, e)
+        print("chat template error:", type(e).__name__, e)
         return RedirectResponse("/chats?err=chat", 303)
+
 
 @app.post("/chat/{conversation_id}/send")
 async def send_message(req: Request, conversation_id: int, contenuto: str = Form(...)):
@@ -953,6 +1043,169 @@ async def update_interessi(req: Request):
     cur.close()
     c.close()
     return RedirectResponse("/profile", 303)
+
+
+@app.get("/u/{user_id}", response_class=HTMLResponse)
+async def public_profile(req: Request, user_id: int):
+    """Profilo di un altro utente (match / notifica)."""
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    if user_id == user["id"]:
+        return RedirectResponse("/profile", 303)
+    c = db()
+    cur = c.cursor()
+    cur.execute("SELECT * FROM users WHERE id=%s AND stato='attivo'", (user_id,))
+    row = cur.fetchone()
+    if not row:
+        cur.close()
+        c.close()
+        return RedirectResponse("/matches", 303)
+    altro = dict(row)
+    try:
+        altro["eta"] = eta(altro.get("data_nascita"))
+    except Exception:
+        altro["eta"] = None
+    # match?
+    u1, u2 = sorted([user["id"], user_id])
+    cur.execute(
+        "SELECT id FROM matches WHERE user1_id=%s AND user2_id=%s AND COALESCE(attivo,1)=1",
+        (u1, u2),
+    )
+    is_match = cur.fetchone() is not None
+    photos = []
+    try:
+        if is_match:
+            cur.execute(
+                "SELECT * FROM user_photos WHERE user_id=%s AND COALESCE(is_private,0)=0 ORDER BY id LIMIT 12",
+                (user_id,),
+            )
+        else:
+            cur.execute(
+                "SELECT * FROM user_photos WHERE user_id=%s AND COALESCE(is_private,0)=0 ORDER BY id LIMIT 6",
+                (user_id,),
+            )
+        photos = [dict(p) for p in cur.fetchall()]
+    except Exception:
+        pass
+    conv_id = None
+    if is_match:
+        try:
+            cur.execute(
+                """SELECT c.id FROM conversations c
+                   JOIN matches m ON m.id = c.match_id
+                   WHERE m.user1_id=%s AND m.user2_id=%s LIMIT 1""",
+                (u1, u2),
+            )
+            r = cur.fetchone()
+            conv_id = r["id"] if r else None
+        except Exception:
+            pass
+    cur.close()
+    c.close()
+    return templates.TemplateResponse("public_profile.html", {
+        "request": req, "user": user, "altro": altro, "photos": photos,
+        "is_match": is_match, "conv_id": conv_id,
+        "unread": unread_count(user["id"]),
+    })
+
+
+@app.get("/notifications/{notif_id}/open")
+async def notification_open(req: Request, notif_id: int):
+    """Apre il profilo di chi ha generato la notifica (o chat se messaggio)."""
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute(
+            "SELECT * FROM notifications WHERE id=%s AND user_id=%s",
+            (notif_id, user["id"]),
+        )
+        n = cur.fetchone()
+        if not n:
+            cur.close()
+            c.close()
+            return RedirectResponse("/notifications", 303)
+        n = dict(n)
+        try:
+            cur.execute("UPDATE notifications SET letto=1 WHERE id=%s", (notif_id,))
+            c.commit()
+        except Exception:
+            c.rollback()
+
+        tipo = (n.get("tipo") or "").lower()
+        related = n.get("related_id")
+        target_user = None
+
+        if tipo in ("nuovo_messaggio", "messaggio", "chat"):
+            # related = conversation_id → vai in chat
+            if related:
+                cur.close()
+                c.close()
+                return RedirectResponse(f"/chat/{related}", 303)
+
+        if tipo in ("nuovo_match", "match"):
+            # related = match_id → altro utente
+            if related:
+                cur.execute("SELECT user1_id, user2_id FROM matches WHERE id=%s", (related,))
+                m = cur.fetchone()
+                if m:
+                    target_user = m["user2_id"] if m["user1_id"] == user["id"] else m["user1_id"]
+
+        if tipo in ("dono", "gift", "regalo"):
+            if related:
+                try:
+                    cur.execute("SELECT from_user_id FROM gifts_sent WHERE id=%s", (related,))
+                    g = cur.fetchone()
+                    if g:
+                        target_user = g["from_user_id"]
+                except Exception:
+                    pass
+
+        if tipo in ("like", "superlike", "nuovo_like"):
+            # related potrebbe essere from_user_id o swipe id
+            if related:
+                try:
+                    cur.execute("SELECT from_user_id FROM swipes WHERE id=%s", (related,))
+                    s = cur.fetchone()
+                    if s:
+                        target_user = s["from_user_id"]
+                    else:
+                        target_user = related  # assume user id
+                except Exception:
+                    target_user = related
+
+        if tipo in ("richiesta_foto", "foto_decisione"):
+            if related:
+                # related often conversation_id
+                cur.close()
+                c.close()
+                return RedirectResponse(f"/chat/{related}", 303)
+
+        # from_user_id column se esiste
+        if not target_user and n.get("from_user_id"):
+            target_user = n["from_user_id"]
+
+        cur.close()
+        c.close()
+        if target_user:
+            return RedirectResponse(f"/u/{target_user}", 303)
+        if tipo in ("nuovo_match", "match"):
+            return RedirectResponse("/matches", 303)
+        if tipo in ("like", "superlike"):
+            return RedirectResponse("/likes", 303)
+        return RedirectResponse("/notifications", 303)
+    except Exception as e:
+        print("notification_open:", e)
+        try:
+            cur.close()
+            c.close()
+        except Exception:
+            pass
+        return RedirectResponse("/notifications", 303)
+
 
 @app.get("/notifications", response_class=HTMLResponse)
 async def notifications_page(req: Request):

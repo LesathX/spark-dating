@@ -17,10 +17,10 @@
     <div class="flex items-center gap-3 px-4 py-3 border-b border-white/10">
         <a href="/matches" class="text-gray-400 text-xl">←</a>
         <div class="w-10 h-10 rounded-full bg-gradient-to-br from-red-700 to-black flex items-center justify-center font-hot">
-            {{ altro.nome[0] | upper }}
+            {{ (altro.nome or altro.username or '?')[0] | upper }}
         </div>
         <div>
-            <div class="font-hot text-lg tracking-wide">{{ altro.nome }}, {{ altro.eta }}</div>
+            <div class="font-hot text-lg tracking-wide">{{ altro.nome or altro.username }}{% if altro.eta %}, {{ altro.eta }}{% endif %}</div>
             <div class="text-xs text-gray-500">@{{ altro.username }}</div>
         </div>
     </div>
@@ -83,7 +83,7 @@
                 {% endif %}">
                 {{ msg.contenuto }}
                 <div class="text-[10px] mt-1 opacity-60 text-right">
-                    {{ msg.data_invio[11:16] if msg.data_invio else '' }}
+                    {% if msg.ora %}{{ msg.ora }}{% elif msg.data_invio %}{{ msg.data_invio }}{% endif %}
                 </div>
             </div>
         </div>

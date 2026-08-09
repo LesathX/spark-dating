@@ -1,82 +1,91 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Registrati – MyCheating</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body { background-color: #0a0a0a; font-family: 'Oswald', sans-serif; }
-        .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
-        .btn-red { background: #ff1a1a; }
-        .btn-red:hover { background: #e60000; }
-        .text-red-pure { color: #ff1a1a; }
-        input:focus, select:focus, textarea:focus { border-color: #ff1a1a !important; outline: none; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Registrati – MyCheating</title>
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background:#0a0a0a; font-family:'Oswald',sans-serif; }
+    .font-hot { font-family:'Bebas Neue',sans-serif; letter-spacing:1px; }
+  </style>
 </head>
-<body class="min-h-screen flex items-center justify-center px-4 py-10">
+<body class="text-white min-h-screen flex items-center justify-center p-4">
+  <div class="w-full max-w-md border border-white/10 rounded-2xl p-6 bg-black/60">
+    <h1 class="font-hot text-4xl tracking-wide text-[#ff0000] mb-1">REGISTRATI</h1>
+    <p class="text-sm text-gray-500 mb-5">Crea il tuo account MyCheating</p>
 
-    <div class="w-full max-w-md">
-        <div class="mb-8 text-center">
-            <h1 class="font-hot text-5xl text-white tracking-wide">REGISTRATI</h1>
-            <div class="w-16 h-1 bg-[#ff1a1a] mx-auto mt-2 mb-3"></div>
-            <p class="text-gray-400 text-sm">Crea il tuo account gratis</p>
+    {% if error %}
+      {% if already_registered %}
+      <div class="mb-4 text-sm text-yellow-200 bg-yellow-900/30 border border-yellow-500/40 rounded-xl px-4 py-3">
+        {{ error }}
+        <div class="mt-2">
+          <a href="/login" class="text-[#ff0000] font-semibold underline">Vai al login →</a>
         </div>
+      </div>
+      {% else %}
+      <div class="mb-4 text-sm text-red-400 bg-red-900/20 border border-red-500/30 rounded-xl px-4 py-2">{{ error }}</div>
+      {% endif %}
+    {% endif %}
 
-        <form method="post" action="/register" class="space-y-4">
-            <div class="grid grid-cols-2 gap-3">
-                <input type="text" name="nome" required placeholder="Nome"
-                       class="w-full bg-transparent border border-white/20 text-white placeholder-gray-500 rounded-lg px-4 py-3 text-sm">
-                <input type="text" name="username" required placeholder="Username"
-                       class="w-full bg-transparent border border-white/20 text-white placeholder-gray-500 rounded-lg px-4 py-3 text-sm">
-            </div>
-
-            <input type="email" name="email" required placeholder="Email"
-                   class="w-full bg-transparent border border-white/20 text-white placeholder-gray-500 rounded-lg px-4 py-3 text-sm">
-
-            <input type="password" name="password" required placeholder="Password" minlength="6"
-                   class="w-full bg-transparent border border-white/20 text-white placeholder-gray-500 rounded-lg px-4 py-3 text-sm">
-
-            <input type="date" name="data_nascita" required
-                   class="w-full bg-transparent border border-white/20 text-white rounded-lg px-4 py-3 text-sm">
-
-            <div class="grid grid-cols-2 gap-3">
-                <select name="genere" required class="w-full bg-[#0a0a0a] border border-white/20 text-white rounded-lg px-4 py-3 text-sm">
-                    <option value="">Genere</option>
-                    <option value="uomo">Uomo</option>
-                    <option value="donna">Donna</option>
-                    <option value="non-binario">Non-binario</option>
-                    <option value="altro">Altro</option>
-                </select>
-                <select name="orientamento" required class="w-full bg-[#0a0a0a] border border-white/20 text-white rounded-lg px-4 py-3 text-sm">
-                    <option value="">Orientamento</option>
-                    <option value="etero">Etero</option>
-                    <option value="gay">Gay</option>
-                    <option value="lesbica">Lesbica</option>
-                    <option value="bi">Bi</option>
-                    <option value="altro">Altro</option>
-                </select>
-            </div>
-
-            <input type="text" name="citta" placeholder="Città (opzionale)"
-                   class="w-full bg-transparent border border-white/20 text-white placeholder-gray-500 rounded-lg px-4 py-3 text-sm">
-
-            <textarea name="bio" rows="3" placeholder="Bio (opzionale)"
-                      class="w-full bg-transparent border border-white/20 text-white placeholder-gray-500 rounded-lg px-4 py-3 text-sm resize-none"></textarea>
-
-            <button type="submit" class="w-full btn-red text-white font-semibold py-3.5 rounded-lg tracking-wide mt-2">
-                CREA ACCOUNT
-            </button>
-        </form>
-
-        <p class="text-center text-sm text-gray-500 mt-8">
-            Hai già un account?
-            <a href="/login" class="text-red-pure font-medium hover:underline">Accedi</a>
-        </p>
-    </div>
-
+    <form method="post" action="/register" class="space-y-3">
+      <div>
+        <label class="text-xs text-gray-500">Email *</label>
+        <input name="email" type="email" required value="{{ form.email if form else '' }}"
+               class="w-full mt-1 bg-black border border-white/20 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-[#ff0000]">
+      </div>
+      <div>
+        <label class="text-xs text-gray-500">Password * (min. 6)</label>
+        <input name="password" type="password" required minlength="6"
+               class="w-full mt-1 bg-black border border-white/20 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-[#ff0000]">
+      </div>
+      <div>
+        <label class="text-xs text-gray-500">Username *</label>
+        <input name="username" required value="{{ form.username if form else '' }}"
+               class="w-full mt-1 bg-black border border-white/20 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-[#ff0000]">
+      </div>
+      <div>
+        <label class="text-xs text-gray-500">Nome *</label>
+        <input name="nome" required value="{{ form.nome if form else '' }}"
+               class="w-full mt-1 bg-black border border-white/20 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-[#ff0000]">
+      </div>
+      <div>
+        <label class="text-xs text-gray-500">Data di nascita *</label>
+        <input name="data_nascita" type="date" required value="{{ form.data_nascita if form else '' }}"
+               class="w-full mt-1 bg-black border border-white/20 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-[#ff0000]">
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-xs text-gray-500">Genere *</label>
+          <select name="genere" class="w-full mt-1 bg-black border border-white/20 rounded-xl px-3 py-2.5 text-sm">
+            <option value="donna" {% if form and form.genere=='donna' %}selected{% endif %}>Donna</option>
+            <option value="uomo" {% if form and form.genere=='uomo' %}selected{% endif %}>Uomo</option>
+            <option value="altro" {% if form and form.genere=='altro' %}selected{% endif %}>Altro</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-gray-500">Orientamento *</label>
+          <select name="orientamento" class="w-full mt-1 bg-black border border-white/20 rounded-xl px-3 py-2.5 text-sm">
+            <option value="etero">Etero</option>
+            <option value="omo">Omo</option>
+            <option value="bi">Bi</option>
+            <option value="tutti">Tutti</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label class="text-xs text-gray-500">Città</label>
+        <input name="citta" value="{{ form.citta if form else '' }}"
+               class="w-full mt-1 bg-black border border-white/20 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-[#ff0000]">
+      </div>
+      <div>
+        <label class="text-xs text-gray-500">Bio</label>
+        <textarea name="bio" rows="2" class="w-full mt-1 bg-black border border-white/20 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-[#ff0000]">{{ form.bio if form else '' }}</textarea>
+      </div>
+      <button class="w-full bg-[#ff0000] py-3 rounded-xl font-semibold mt-2">Crea account</button>
+    </form>
+    <p class="text-center text-xs text-gray-500 mt-4">Hai già un account? <a href="/login" class="text-[#ff0000]">Accedi</a></p>
+  </div>
 </body>
 </html>

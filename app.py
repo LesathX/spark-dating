@@ -331,20 +331,76 @@ async def reg_page(req: Request):
 async def reg(req: Request, email: str = Form(...), password: str = Form(...), username: str = Form(...),
               nome: str = Form(...), data_nascita: str = Form(...), genere: str = Form(...),
               orientamento: str = Form(...), bio: str = Form(""), citta: str = Form("")):
+    email = (email or "").strip().lower()
+    username = (username or "").strip()
+    form_data = {
+        "email": email, "username": username, "nome": nome,
+        "data_nascita": data_nascita, "genere": genere, "orientamento": orientamento,
+        "bio": bio, "citta": citta,
+    }
     c = db()
     cur = c.cursor()
     try:
+        # controlli espliciti prima dell'INSERT
+        cur.execute(
+            "SELECT id FROM users WHERE lower(email)=%s LIMIT 1",
+            (email,),
+        )
+        if cur.fetchone():
+            return templates.TemplateResponse("register.html", {
+                "request": req,
+                "error": "Questa email è già registrata. Accedi oppure usa «Password dimenticata».",
+                "already_registered": True,
+                "form": form_data,
+            })
+        cur.execute(
+            "SELECT id FROM users WHERE lower(username)=%s LIMIT 1",
+            (username.lower(),),
+        )
+        if cur.fetchone():
+            return templates.TemplateResponse("register.html", {
+                "request": req,
+                "error": "Questo username è già in uso. Scegline un altro.",
+                "already_registered": False,
+                "form": form_data,
+            })
+        if len(password or "") < 6:
+            return templates.TemplateResponse("register.html", {
+                "request": req,
+                "error": "La password deve avere almeno 6 caratteri.",
+                "form": form_data,
+            })
         cur.execute("""INSERT INTO users (email,password_hash,username,nome,data_nascita,genere,orientamento,bio,citta)
                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                     (email, hash_pw(password), username, nome, data_nascita, genere, orientamento, bio or None, citta or None))
         uid = cur.fetchone()["id"]
-        cur.execute("INSERT INTO user_preferences (user_id) VALUES (%s)", (uid,))
+        try:
+            cur.execute("INSERT INTO user_preferences (user_id) VALUES (%s)", (uid,))
+        except Exception:
+            pass
         c.commit()
         req.session["user_id"] = uid
         return RedirectResponse("/discover", 303)
     except psycopg2.IntegrityError:
         c.rollback()
-        return templates.TemplateResponse("register.html", {"request": req, "error": "Email o username gia in uso"})
+        # fallback se race condition
+        return templates.TemplateResponse("register.html", {
+            "request": req,
+            "error": "Email o username già registrati. Se hai già un account, vai al login.",
+            "already_registered": True,
+            "form": form_data,
+        })
+    except Exception as e:
+        print("register error:", e)
+        try:
+            c.rollback()
+        except Exception:
+            pass
+        return templates.TemplateResponse("register.html", {
+            "request": req,
+            "error": "Errore durante la registrazione. Riprova.",
+            "form": form_data,
+        })
     finally:
         cur.close()
         c.close()

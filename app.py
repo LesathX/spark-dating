@@ -366,11 +366,33 @@ async def login(req: Request, email: str = Form(...), password: str = Form(...))
             return templates.TemplateResponse("login.html", {"request": req, "error": "Password errata"})
         req.session.clear()
         req.session["user_id"] = u["id"]
+        # salva IP (proxy-aware)
+        ip = None
         try:
-            cur.execute("UPDATE users SET is_online=1, ultimo_accesso=CURRENT_TIMESTAMP WHERE id=%s", (u["id"],))
-            c.commit()
+            xf = req.headers.get("x-forwarded-for") or req.headers.get("X-Forwarded-For")
+            if xf:
+                ip = xf.split(",")[0].strip()
+            if not ip:
+                ip = getattr(getattr(req, "client", None), "host", None)
         except Exception:
-            pass
+            ip = None
+        try:
+            if ip:
+                cur.execute(
+                    """UPDATE users SET is_online=1, ultimo_accesso=CURRENT_TIMESTAMP, last_ip=%s WHERE id=%s""",
+                    (ip[:64], u["id"]),
+                )
+            else:
+                cur.execute("UPDATE users SET is_online=1, ultimo_accesso=CURRENT_TIMESTAMP WHERE id=%s", (u["id"],))
+            c.commit()
+        except Exception as e:
+            print("login ip col?:", e)
+            try:
+                c.rollback()
+                cur.execute("UPDATE users SET is_online=1, ultimo_accesso=CURRENT_TIMESTAMP WHERE id=%s", (u["id"],))
+                c.commit()
+            except Exception:
+                pass
         return RedirectResponse("/discover", 303)
     finally:
         cur.close()
@@ -1460,7 +1482,10 @@ async def chat_report(req: Request, conversation_id: int, motivo: str = Form("")
         # conta segnalazioni distinte (reporter diversi)
         try:
             cur.execute(
-                "SELECT COUNT(DISTINCT reporter_id) AS n FROM reports WHERE reported_id=%s",
+                """SELECT COUNT(DISTINCT reporter_id) AS n FROM reports
+                   WHERE reported_id=%s
+                     AND COALESCE(created_at, NOW()) > NOW() - interval '30 days'
+                     AND COALESCE(status,'open') NOT IN ('false','dismissed')""",
                 (altro_id,),
             )
             row = cur.fetchone()
@@ -1469,9 +1494,18 @@ async def chat_report(req: Request, conversation_id: int, motivo: str = Form("")
             print("report count:", e)
             try:
                 c.rollback()
+                cur.execute(
+                    "SELECT COUNT(DISTINCT reporter_id) AS n FROM reports WHERE reported_id=%s",
+                    (altro_id,),
+                )
+                row = cur.fetchone()
+                report_count = int((row["n"] if row else 0) or 0)
             except Exception:
-                pass
-            report_count = 0
+                try:
+                    c.rollback()
+                except Exception:
+                    pass
+                report_count = 0
 
         # blocco bilaterale lato reporter
         try:
@@ -2022,6 +2056,19 @@ async def admin_panel(req: Request):
         return RedirectResponse("/login", 303)
 
     tab = req.query_params.get("tab") or "users"
+    # ensure optional columns
+    try:
+        c0 = db()
+        cur0 = c0.cursor()
+        cur0.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip VARCHAR(64)")
+        cur0.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_bot INTEGER DEFAULT 0")
+        cur0.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS false_reports_count INTEGER DEFAULT 0")
+        c0.commit()
+        cur0.close()
+        c0.close()
+    except Exception:
+        pass
+
     q = (req.query_params.get("q") or "").strip()
     mq = (req.query_params.get("mq") or "").strip()
     message_hits = []
@@ -2062,14 +2109,14 @@ async def admin_panel(req: Request):
         if q:
             like = f"%{q}%"
             cur.execute("""
-                SELECT id, nome, username, email, stato, is_admin, is_mod, credits, is_online, latitude, longitude, bio, citta, genere, orientamento, data_nascita, ruolo, sospeso_fino, note_admin
+                SELECT id, nome, username, email, stato, is_admin, is_mod, credits, is_online, latitude, longitude, bio, citta, genere, orientamento, data_nascita, ruolo, sospeso_fino, note_admin, last_ip
                 FROM users
                 WHERE nome ILIKE %s OR email ILIKE %s OR username ILIKE %s
                 ORDER BY id DESC LIMIT 100
             """, (like, like, like))
         else:
             cur.execute("""
-                SELECT id, nome, username, email, stato, is_admin, is_mod, credits, is_online, latitude, longitude, bio, citta, genere, orientamento, data_nascita, ruolo, sospeso_fino, note_admin
+                SELECT id, nome, username, email, stato, is_admin, is_mod, credits, is_online, latitude, longitude, bio, citta, genere, orientamento, data_nascita, ruolo, sospeso_fino, note_admin, last_ip
                 FROM users ORDER BY id DESC LIMIT 100
             """)
         users = [dict(u) for u in cur.fetchall()]
@@ -2303,6 +2350,8 @@ async def admin_panel(req: Request):
     gift_types = []
     gifts_recent = []
     blocks = []
+    reports = []
+    reports_open = 0
 
     gallery_folders = []  # [{user_id, nome, username, count, private_count}]
     folder_user_id = None
@@ -2420,26 +2469,87 @@ async def admin_panel(req: Request):
     if tab == "blocchi":
         try:
             cur.execute("""
-                SELECT b.*, u1.nome as blocker_nome, u2.nome as blocked_nome
+                SELECT b.id, b.blocker_id, b.blocked_id, b.created_at,
+                       u1.nome as blocker_nome, u1.username as blocker_user,
+                       u2.nome as blocked_nome, u2.username as blocked_user
                 FROM blocks b
                 JOIN users u1 ON u1.id = b.blocker_id
                 JOIN users u2 ON u2.id = b.blocked_id
-                ORDER BY b.id DESC LIMIT 100
+                ORDER BY b.id DESC LIMIT 200
             """)
             blocks = [dict(r) for r in cur.fetchall()]
         except Exception as e:
             print("admin blocks:", e)
             try:
+                c.rollback()
                 cur.execute("""
                     SELECT b.*, u1.nome as blocker_nome, u2.nome as blocked_nome
                     FROM blocks b
                     JOIN users u1 ON u1.id = b.blocker_id
                     JOIN users u2 ON u2.id = b.blocked_id
-                    ORDER BY b.created_at DESC NULLS LAST LIMIT 100
+                    ORDER BY b.id DESC LIMIT 200
                 """)
                 blocks = [dict(r) for r in cur.fetchall()]
             except Exception as e2:
                 print("admin blocks2:", e2)
+
+    reports = []
+    reports_open = 0
+    if tab == "segnalazioni":
+        try:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS reports (
+                    id SERIAL PRIMARY KEY,
+                    reporter_id INTEGER,
+                    reported_id INTEGER,
+                    motivo TEXT,
+                    conversation_id INTEGER,
+                    status VARCHAR(20) DEFAULT 'open',
+                    reviewed_by INTEGER,
+                    reviewed_at TIMESTAMP,
+                    false_report INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            c.commit()
+        except Exception:
+            try:
+                c.rollback()
+            except Exception:
+                pass
+        try:
+            cur.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'open'")
+            cur.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS reviewed_by INTEGER")
+            cur.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP")
+            cur.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS false_report INTEGER DEFAULT 0")
+            c.commit()
+        except Exception:
+            try:
+                c.rollback()
+            except Exception:
+                pass
+        try:
+            cur.execute("""
+                SELECT r.*,
+                       u1.nome as reporter_nome, u1.username as reporter_user,
+                       u2.nome as reported_nome, u2.username as reported_user,
+                       u2.stato as reported_stato, u2.sospeso_fino as reported_sospeso
+                FROM reports r
+                LEFT JOIN users u1 ON u1.id = r.reporter_id
+                LEFT JOIN users u2 ON u2.id = r.reported_id
+                ORDER BY
+                  CASE WHEN COALESCE(r.status,'open')='open' THEN 0 ELSE 1 END,
+                  r.created_at DESC NULLS LAST
+                LIMIT 300
+            """)
+            reports = [dict(x) for x in cur.fetchall()]
+            reports_open = sum(1 for x in reports if (x.get("status") or "open") == "open")
+        except Exception as e:
+            print("admin reports:", e)
+            try:
+                c.rollback()
+            except Exception:
+                pass
 
     search_results = []  # lista globale {tipo, titolo, sottotitolo, link, meta}
 
@@ -2695,6 +2805,8 @@ async def admin_panel(req: Request):
         "gift_types": gift_types,
         "gifts_recent": gifts_recent,
         "blocks": blocks,
+        "reports": reports if tab == "segnalazioni" else [],
+        "reports_open": reports_open if tab == "segnalazioni" else 0,
         "bots": bots,
         "mq": mq,
         "message_hits": message_hits,
@@ -2706,74 +2818,411 @@ async def admin_panel(req: Request):
 
 
 
-@app.post("/admin/bots/create")
-async def admin_bot_create(req: Request):
-    if not require_admin(req):
+
+
+@app.post("/admin/blocks/remove/{block_id}")
+async def admin_remove_block(req: Request, block_id: int):
+    """Admin/mod annulla un blocco tra due utenti."""
+    if not require_mod(req):
         return RedirectResponse("/login", 303)
-    form = await req.form()
-    nome = (form.get("nome") or "").strip()
-    username = (form.get("username") or "").strip()
-    email = (form.get("email") or "").strip().lower()
-    password = (form.get("password") or "bot1234").strip()
-    genere = form.get("genere") or "altro"
-    citta = (form.get("citta") or "").strip() or None
-    bio = (form.get("bio") or "").strip() or None
-    try:
-        credits = int(form.get("credits") or 50)
-    except Exception:
-        credits = 50
-    if not nome:
-        return RedirectResponse("/admin?tab=bot&err=nome", 303)
-    if not username:
-        username = "bot_" + nome.lower().replace(" ", "_")[:20]
-    if not email:
-        email = f"{username}@bot.mycheating.local"
-    from datetime import date
-    data_nascita = date(date.today().year - 25, 1, 1).isoformat()
-    pwd_hash = hash_pw(password)
     c = db()
     cur = c.cursor()
     try:
-        cur.execute("SELECT id FROM users WHERE email=%s OR username=%s", (email, username))
-        if cur.fetchone():
+        cur.execute("SELECT blocker_id, blocked_id FROM blocks WHERE id=%s", (block_id,))
+        row = cur.fetchone()
+        if row:
+            cur.execute("DELETE FROM blocks WHERE id=%s", (block_id,))
+            # opzionale: riattiva match se esisteva
+            try:
+                u1, u2 = sorted([row["blocker_id"], row["blocked_id"]])
+                cur.execute(
+                    "UPDATE matches SET attivo=1 WHERE user1_id=%s AND user2_id=%s",
+                    (u1, u2),
+                )
+            except Exception:
+                pass
+            c.commit()
+    except Exception as e:
+        print("admin_remove_block:", e)
+        try:
+            c.rollback()
+        except Exception:
+            pass
+    finally:
+        cur.close()
+        c.close()
+    return RedirectResponse("/admin?tab=blocchi&ok=sbloccato", 303)
+
+
+@app.post("/admin/blocks/remove-pair")
+async def admin_remove_block_pair(req: Request, blocker_id: int = Form(...), blocked_id: int = Form(...)):
+    if not require_mod(req):
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute(
+            "DELETE FROM blocks WHERE (blocker_id=%s AND blocked_id=%s) OR (blocker_id=%s AND blocked_id=%s)",
+            (blocker_id, blocked_id, blocked_id, blocker_id),
+        )
+        c.commit()
+    except Exception as e:
+        print("remove pair:", e)
+        try:
+            c.rollback()
+        except Exception:
+            pass
+    finally:
+        cur.close()
+        c.close()
+    return RedirectResponse("/admin?tab=blocchi&ok=sbloccato", 303)
+
+
+@app.post("/admin/reports/{report_id}/accept")
+async def admin_report_accept(req: Request, report_id: int):
+    """Segnalazione valida: conferma, opzionale ban/sospensione resta a GESTISCI."""
+    admin = require_admin(req)
+    if not admin:
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute(
+            """UPDATE reports SET status='accepted', reviewed_by=%s, reviewed_at=NOW(), false_report=0
+               WHERE id=%s RETURNING reported_id, reporter_id""",
+            (admin["id"], report_id),
+        )
+        row = cur.fetchone()
+        if row:
+            # notifica reporter: grazie
+            try:
+                cur.execute(
+                    """INSERT INTO notifications (user_id, tipo, titolo, contenuto, related_id)
+                       VALUES (%s,'report_ok',%s,%s,%s)""",
+                    (row["reporter_id"], "✅ Segnalazione presa in carico",
+                     "Grazie: la tua segnalazione è stata esaminata dallo staff.", row["reported_id"]),
+                )
+            except Exception:
+                pass
+        c.commit()
+    except Exception as e:
+        print("report accept:", e)
+        try:
+            c.rollback()
+        except Exception:
+            pass
+    finally:
+        cur.close()
+        c.close()
+    return RedirectResponse("/admin?tab=segnalazioni&ok=accepted", 303)
+
+
+@app.post("/admin/reports/{report_id}/dismiss")
+async def admin_report_dismiss(req: Request, report_id: int):
+    """Segnalazione archiviata senza azione (non conta come falsa)."""
+    admin = require_admin(req)
+    if not admin:
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute(
+            """UPDATE reports SET status='dismissed', reviewed_by=%s, reviewed_at=NOW()
+               WHERE id=%s""",
+            (admin["id"], report_id),
+        )
+        c.commit()
+    except Exception as e:
+        print("report dismiss:", e)
+        try:
+            c.rollback()
+        except Exception:
+            pass
+    finally:
+        cur.close()
+        c.close()
+    return RedirectResponse("/admin?tab=segnalazioni&ok=dismissed", 303)
+
+
+@app.post("/admin/reports/{report_id}/false")
+async def admin_report_false(req: Request, report_id: int):
+    """Segnalazione falsa: penalizza il reporter dopo 3 false."""
+    admin = require_admin(req)
+    if not admin:
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute(
+            """UPDATE reports SET status='false', false_report=1, reviewed_by=%s, reviewed_at=NOW()
+               WHERE id=%s RETURNING reporter_id, reported_id""",
+            (admin["id"], report_id),
+        )
+        row = cur.fetchone()
+        if row and row.get("reporter_id"):
+            rid = row["reporter_id"]
+            # conta false reports ultimi 90 giorni
+            cur.execute(
+                """SELECT COUNT(*) AS n FROM reports
+                   WHERE reporter_id=%s AND COALESCE(false_report,0)=1
+                     AND created_at >= NOW() - interval '90 days'""",
+                (rid,),
+            )
+            n = int((cur.fetchone() or {}).get("n") or 0)
+            if n >= 3:
+                # penalità: restrizione segnalare + warning sospensione soft
+                try:
+                    cur.execute("""
+                        INSERT INTO user_restrictions (user_id, no_chat)
+                        VALUES (%s, 0)
+                        ON CONFLICT (user_id) DO NOTHING
+                    """, (rid,))
+                except Exception:
+                    pass
+                try:
+                    cur.execute(
+                        """UPDATE users SET stato='sospeso', sospeso_fino = NOW() + interval '3 days'
+                           WHERE id=%s AND COALESCE(stato,'') <> 'bannato'""",
+                        (rid,),
+                    )
+                except Exception:
+                    try:
+                        c.rollback()
+                        cur.execute("UPDATE users SET stato='sospeso' WHERE id=%s", (rid,))
+                    except Exception:
+                        pass
+                try:
+                    cur.execute(
+                        """INSERT INTO notifications (user_id, tipo, titolo, contenuto, related_id)
+                           VALUES (%s,'penalty',%s,%s,%s)""",
+                        (rid, "⚠️ Abuso segnalazioni",
+                         f"Hai accumulato {n} segnalazioni false. Account sospeso 3 giorni.",
+                         report_id),
+                    )
+                except Exception:
+                    pass
+            else:
+                try:
+                    cur.execute(
+                        """INSERT INTO notifications (user_id, tipo, titolo, contenuto, related_id)
+                           VALUES (%s,'report_false',%s,%s,%s)""",
+                        (rid, "Segnalazione non valida",
+                         f"Una tua segnalazione è stata giudicata non fondata ({n}/3). Al terzo abuso potresti essere sospeso.",
+                         row.get("reported_id")),
+                    )
+                except Exception:
+                    pass
+        c.commit()
+    except Exception as e:
+        print("report false:", e)
+        try:
+            c.rollback()
+        except Exception:
+            pass
+    finally:
+        cur.close()
+        c.close()
+    return RedirectResponse("/admin?tab=segnalazioni&ok=false", 303)
+
+
+@app.post("/admin/reports/{report_id}/unsuspend")
+async def admin_report_unsuspend(req: Request, report_id: int):
+    """Toglie sospensione all'utente segnalato (review umana)."""
+    admin = require_admin(req)
+    if not admin:
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute("SELECT reported_id FROM reports WHERE id=%s", (report_id,))
+        row = cur.fetchone()
+        if row:
+            uid = row["reported_id"]
+            cur.execute(
+                """UPDATE users SET stato='attivo', sospeso_fino=NULL WHERE id=%s AND COALESCE(stato,'')='sospeso'""",
+                (uid,),
+            )
+            try:
+                cur.execute(
+                    """UPDATE user_restrictions SET no_chat=0, no_messaggi=0 WHERE user_id=%s""",
+                    (uid,),
+                )
+            except Exception:
+                pass
+            try:
+                cur.execute(
+                    """INSERT INTO notifications (user_id, tipo, titolo, contenuto, related_id)
+                       VALUES (%s,'unsuspend',%s,%s,%s)""",
+                    (uid, "✅ Sospensione revocata", "Lo staff ha riesaminato il tuo account. La sospensione è stata tolta.", admin["id"]),
+                )
+            except Exception:
+                pass
+            cur.execute(
+                """UPDATE reports SET status='reviewed_ok', reviewed_by=%s, reviewed_at=NOW() WHERE id=%s""",
+                (admin["id"], report_id),
+            )
+        c.commit()
+    except Exception as e:
+        print("unsuspend:", e)
+        try:
+            c.rollback()
+        except Exception:
+            pass
+    finally:
+        cur.close()
+        c.close()
+    return RedirectResponse("/admin?tab=segnalazioni&ok=unsuspend", 303)
+
+
+@app.post("/admin/bots/create")
+async def admin_bot_create(req: Request):
+    """Genera bot automatico: admin sceglie solo genere + orientamento (e opz. quanti)."""
+    if not require_admin(req):
+        return RedirectResponse("/login", 303)
+    form = await req.form()
+    genere = (form.get("genere") or "donna").strip().lower()
+    orientamento = (form.get("orientamento") or "etero").strip().lower()
+    try:
+        quanti = int(form.get("quanti") or 1)
+    except Exception:
+        quanti = 1
+    quanti = max(1, min(quanti, 20))  # max 20 alla volta
+
+    import random, uuid
+    from datetime import date, timedelta
+
+    NOMI_F = ["Giulia", "Sara", "Francesca", "Chiara", "Valentina", "Martina", "Elena", "Alice",
+              "Sofia", "Aurora", "Greta", "Noemi", "Irene", "Camilla", "Beatrice", "Ludovica",
+              "Federica", "Silvia", "Laura", "Paola", "Michela", "Elisa", "Giorgia", "Rebecca"]
+    NOMI_M = ["Marco", "Luca", "Alessandro", "Andrea", "Matteo", "Davide", "Francesco", "Lorenzo",
+              "Simone", "Riccardo", "Gabriele", "Tommaso", "Nicola", "Stefano", "Paolo", "Antonio",
+              "Giovanni", "Fabio", "Daniele", "Emanuele", "Samuele", "Pietro", "Leonardo", "Diego"]
+    NOMI_A = NOMI_F + NOMI_M + ["Alex", "Sam", "Taylor", "Jordan", "Chris"]
+    CITTA = ["Milano", "Roma", "Torino", "Napoli", "Bologna", "Firenze", "Palermo", "Genova",
+             "Verona", "Padova", "Bari", "Catania", "Venezia", "Trieste", "Brescia", "Parma",
+             "Modena", "Perugia", "Cagliari", "Bergamo"]
+    BIOS = [
+        "Qui per conoscersi senza filtri 🔥",
+        "Amo viaggiare e le serate in città",
+        "Cercando qualcuno di genuino",
+        "Sport, musica e chiacchiere fino a tardi",
+        "Nuovo/a in zona, apriamo una chat?",
+        "Niente storie complicate, solo feeling",
+        "Aperitivo lover 🍷",
+        "Se fai ridere, hai già vinto",
+    ]
+
+    if genere in ("donna", "f", "female", "ragazza"):
+        genere = "donna"
+        nomi = NOMI_F
+    elif genere in ("uomo", "m", "male", "ragazzo"):
+        genere = "uomo"
+        nomi = NOMI_M
+    else:
+        genere = "altro"
+        nomi = NOMI_A
+
+    # normalizza orientamento
+    ori_map = {
+        "etero": "etero", "heterosexual": "etero", "straight": "etero",
+        "omo": "omo", "gay": "omo", "lesbica": "omo", "lesbian": "omo",
+        "bi": "bi", "bisessuale": "bi", "bisexual": "bi",
+        "altro": "altro", "tutti": "tutti",
+    }
+    orientamento = ori_map.get(orientamento, orientamento) or "etero"
+
+    created_ids = []
+    c = db()
+    cur = c.cursor()
+    try:
+        for _ in range(quanti):
+            nome = random.choice(nomi)
+            age = random.randint(21, 38)
+            # compleanno random coerente
+            today = date.today()
+            birth = date(today.year - age, random.randint(1, 12), random.randint(1, 28))
+            nick_base = (nome.lower()
+                         .replace("à", "a").replace("è", "e").replace("é", "e")
+                         .replace("ì", "i").replace("ò", "o").replace("ù", "u"))
+            username = f"{nick_base}{random.randint(10, 99)}{uuid.uuid4().hex[:4]}"
+            email = f"{username}@bot.mycheating.local"
+            citta = random.choice(CITTA)
+            bio = random.choice(BIOS)
+            credits = random.choice([30, 50, 80, 100])
+            password = "bot_" + uuid.uuid4().hex[:8]
+            pwd_hash = hash_pw(password)
+            # leggero offset GPS città italiane approssimative
+            gps = {
+                "Milano": (45.46, 9.19), "Roma": (41.90, 12.50), "Torino": (45.07, 7.69),
+                "Napoli": (40.85, 14.27), "Bologna": (44.49, 11.34), "Firenze": (43.77, 11.25),
+                "Palermo": (38.12, 13.36), "Genova": (44.41, 8.93), "Verona": (45.44, 10.99),
+                "Padova": (45.41, 11.88), "Bari": (41.12, 16.87), "Catania": (37.51, 15.08),
+                "Venezia": (45.44, 12.32), "Trieste": (45.65, 13.78), "Brescia": (45.54, 10.21),
+                "Parma": (44.80, 10.33), "Modena": (44.65, 10.93), "Perugia": (43.11, 12.39),
+                "Cagliari": (39.22, 9.12), "Bergamo": (45.70, 9.67),
+            }
+            lat, lng = gps.get(citta, (41.9, 12.5))
+            lat += random.uniform(-0.08, 0.08)
+            lng += random.uniform(-0.08, 0.08)
+
+            try:
+                cur.execute(
+                    """INSERT INTO users (
+                           email, password_hash, username, nome, data_nascita, genere, orientamento,
+                           bio, citta, credits, stato, is_bot, is_online, latitude, longitude
+                       ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'attivo',1,1,%s,%s) RETURNING id""",
+                    (email, pwd_hash, username, nome, birth.isoformat(), genere, orientamento,
+                     bio, citta, credits, lat, lng),
+                )
+            except Exception as e:
+                print("bot insert full:", e)
+                c.rollback()
+                try:
+                    cur.execute(
+                        """INSERT INTO users (email, password_hash, username, nome, data_nascita, genere, orientamento, bio, citta, is_bot)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,1) RETURNING id""",
+                        (email, pwd_hash, username, nome, birth.isoformat(), genere, orientamento, bio, citta),
+                    )
+                except Exception as e2:
+                    print("bot insert min:", e2)
+                    c.rollback()
+                    continue
+            row = cur.fetchone()
+            if not row:
+                continue
+            new_id = row["id"]
+            try:
+                cur.execute("UPDATE users SET is_bot=1, credits=%s WHERE id=%s", (credits, new_id))
+            except Exception:
+                pass
+            try:
+                cur.execute("INSERT INTO user_preferences (user_id) VALUES (%s) ON CONFLICT DO NOTHING", (new_id,))
+            except Exception:
+                try:
+                    c.rollback()
+                    cur.execute("INSERT INTO user_preferences (user_id) VALUES (%s)", (new_id,))
+                except Exception:
+                    pass
+            created_ids.append(new_id)
+        c.commit()
+    except Exception as e:
+        print("admin_bot_create:", e)
+        try:
+            c.rollback()
+        except Exception:
+            pass
+        return RedirectResponse("/admin?tab=bot&err=create", 303)
+    finally:
+        try:
             cur.close()
             c.close()
-            return RedirectResponse("/admin?tab=bot&err=esiste", 303)
-        try:
-            cur.execute(
-                """INSERT INTO users (email, password_hash, username, nome, data_nascita, genere, orientamento, bio, citta, credits, stato, is_bot)
-                   VALUES (%s,%s,%s,%s,%s,%s,'tutti',%s,%s,%s,'attivo',1) RETURNING id""",
-                (email, pwd_hash, username, nome, data_nascita, genere, bio, citta, credits),
-            )
-        except Exception:
-            c.rollback()
-            cur.execute(
-                """INSERT INTO users (email, password_hash, username, nome, data_nascita, genere, orientamento, bio, citta)
-                   VALUES (%s,%s,%s,%s,%s,%s,'tutti',%s,%s) RETURNING id""",
-                (email, pwd_hash, username, nome, data_nascita, genere, bio, citta),
-            )
-        new_id = cur.fetchone()["id"]
-        try:
-            cur.execute("UPDATE users SET is_bot=1, credits=%s WHERE id=%s", (credits, new_id))
         except Exception:
             pass
-        try:
-            cur.execute("INSERT INTO user_preferences (user_id) VALUES (%s)", (new_id,))
-        except Exception:
-            pass
-        c.commit()
-        cur.close()
-        c.close()
-        return RedirectResponse(f"/admin?tab=bot&ok=created&id={new_id}", 303)
-    except Exception as e:
-        c.rollback()
-        cur.close()
-        c.close()
-        print("bot create:", e)
-        return RedirectResponse("/admin?tab=bot&err=db", 303)
+    if not created_ids:
+        return RedirectResponse("/admin?tab=bot&err=create", 303)
+    return RedirectResponse(f"/admin?tab=bot&ok=created&n={len(created_ids)}", 303)
 
 
-@app.post("/admin/bots/{bot_id}/update")
 async def admin_bot_update(req: Request, bot_id: int):
     if not require_admin(req):
         return RedirectResponse("/login", 303)

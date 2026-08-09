@@ -104,7 +104,14 @@
         <span class="text-base">🚫</span>
         <span class="flex-1">
           <span class="label block font-semibold text-[13px]">BLOCCHI</span>
-          <span class="text-[10px] text-gray-600">Blocchi tra utenti</span>
+          <span class="text-[10px] text-gray-600">Blocchi tra utenti · sblocca</span>
+        </span>
+      </a>
+      <a href="/admin?tab=segnalazioni" class="sidebar-item flex items-center gap-3 px-4 py-2.5 text-sm {% if tab == 'segnalazioni' %}active{% else %}text-gray-400{% endif %}">
+        <span class="text-base">⚠️</span>
+        <span class="flex-1">
+          <span class="label block font-semibold text-[13px]">SEGNALAZIONI</span>
+          <span class="text-[10px] text-gray-600">Review · auto-sospensioni</span>
         </span>
       </a>
       <a href="/admin?tab=social" class="sidebar-item flex items-center gap-3 px-4 py-2.5 text-sm {% if tab == 'social' %}active{% else %}text-gray-400{% endif %}">
@@ -167,9 +174,17 @@
           {% elif tab == 'commenti' %}COMMENTI
           {% elif tab == 'messages' %}MESSAGGI
           {% elif tab == 'ricerca' %}RICERCA
-          {% elif tab == 'bot' %}BOT
+          {% elif tab == 'bot' %}
+      {% if request.query_params.get('ok') == 'created' %}
+      <div class="mb-4 text-sm text-green-400 bg-green-900/20 border border-green-500/30 rounded-xl px-4 py-2">✅ Bot generati: {{ request.query_params.get('n') or 1 }}</div>
+      {% endif %}
+      {% if request.query_params.get('err') %}
+      <div class="mb-4 text-sm text-red-400 bg-red-900/20 border border-red-500/30 rounded-xl px-4 py-2">Errore creazione bot</div>
+      {% endif %}
+BOT
           {% elif tab == 'annunci' %}ANNUNCI
           {% elif tab == 'blocchi' %}BLOCCHI
+          {% elif tab == 'segnalazioni' %}SEGNALAZIONI
           {% elif tab == 'social' %}SOCIAL
           {% elif tab == 'doni' %}DONI
           {% elif tab == 'telefoni' %}TELEFONI
@@ -227,6 +242,7 @@
               <th class="px-4 py-3 font-normal">ETÀ</th>
               <th class="px-4 py-3 font-normal">CITTÀ</th>
               <th class="px-4 py-3 font-normal">POSIZIONE</th>
+              <th class="px-4 py-3 font-normal">IP</th>
               <th class="px-4 py-3 font-normal">RESTRIZIONI</th>
               <th class="px-4 py-3 font-normal">AZIONI</th>
             </tr>
@@ -264,6 +280,9 @@
                 <a href="https://www.google.com/maps?q={{ u.latitude }},{{ u.longitude }}" target="_blank" class="text-[#ff0000] hover:underline">📍 Mappa</a>
                 <div class="text-[10px] text-gray-600 mt-0.5">{{ u.latitude }}, {{ u.longitude }}</div>
                 {% else %}<span class="text-gray-600">—</span>{% endif %}
+              </td>
+              <td class="px-4 py-3 text-[11px] text-gray-400 font-mono">
+                {% if u.last_ip %}<span title="Ultimo IP di accesso">{{ u.last_ip }}</span>{% else %}<span class="text-gray-600">—</span>{% endif %}
               </td>
               <td class="px-4 py-3 text-gray-500 text-xs">
                 {% set ns = namespace(n=0) %}
@@ -491,7 +510,114 @@
         {% endfor %}
       </div>
 
-      <!-- ========== BLOCCHI ========== -->
+            <!-- ========== BLOCCHI ========== -->
+      {% elif tab == 'blocchi' %}
+      <h1 class="font-hot text-4xl tracking-wide mb-2">BLOCCHI</h1>
+      <p class="text-gray-500 text-sm mb-6">Blocchi tra utenti — puoi annullarli (sbloccare)</p>
+      {% if request.query_params.get('ok') == 'sbloccato' %}
+      <div class="mb-4 text-sm text-green-400 bg-green-900/20 border border-green-500/30 rounded-xl px-4 py-2">✅ Blocco annullato</div>
+      {% endif %}
+      <div class="border border-white/10 rounded-xl overflow-hidden">
+        <table class="w-full text-sm">
+          <thead class="text-[11px] text-gray-500 border-b border-white/10">
+            <tr>
+              <th class="px-4 py-3 text-left">CHI BLOCCA</th>
+              <th class="px-4 py-3 text-left">UTENTE BLOCCATO</th>
+              <th class="px-4 py-3 text-left">DATA</th>
+              <th class="px-4 py-3 text-right">AZIONE</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for b in blocks %}
+            <tr class="border-b border-white/5 hover:bg-white/5">
+              <td class="px-4 py-3">
+                <div class="font-semibold">{{ b.blocker_nome or '—' }}</div>
+                <div class="text-[10px] text-gray-500">@{{ b.blocker_user or b.blocker_id }} · id {{ b.blocker_id }}</div>
+              </td>
+              <td class="px-4 py-3">
+                <div class="font-semibold">{{ b.blocked_nome or '—' }}</div>
+                <div class="text-[10px] text-gray-500">@{{ b.blocked_user or b.blocked_id }} · id {{ b.blocked_id }}</div>
+              </td>
+              <td class="px-4 py-3 text-gray-500 text-xs">{{ b.created_at }}</td>
+              <td class="px-4 py-3 text-right">
+                <form method="post" action="/admin/blocks/remove/{{ b.id }}" class="inline"
+                      onsubmit="return confirm('Annullare questo blocco? I due utenti potranno di nuovo interagire se c\'è match.');">
+                  <button class="text-xs bg-white/10 hover:bg-[#ff0000]/30 border border-white/20 px-3 py-1.5 rounded-lg">SBLOCCA</button>
+                </form>
+                {% if b.blocked_id %}
+                <button type="button" onclick="openManage({{ b.blocked_id }})" class="text-xs border border-white/20 px-2 py-1.5 rounded-lg ml-1">GESTISCI</button>
+                {% endif %}
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="px-4 py-8 text-center text-gray-500">Nessun blocco</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ========== SEGNALAZIONI ========== -->
+      {% elif tab == 'segnalazioni' %}
+      <h1 class="font-hot text-4xl tracking-wide mb-2">SEGNALAZIONI</h1>
+      <p class="text-gray-500 text-sm mb-2">Review umana dei report · aperti: <span class="text-[#ff0000] font-semibold">{{ reports_open }}</span></p>
+      <p class="text-xs text-gray-600 mb-6">Soglia auto-sospensione: 5 report distinti negli ultimi 30 giorni. 3 segnalazioni false → sospensione reporter 3 giorni.</p>
+      {% if request.query_params.get('ok') %}
+      <div class="mb-4 text-sm text-green-400 bg-green-900/20 border border-green-500/30 rounded-xl px-4 py-2">Azione salvata ({{ request.query_params.get('ok') }})</div>
+      {% endif %}
+      <div class="space-y-3">
+        {% for r in reports %}
+        <div class="border border-white/10 rounded-xl p-4 {% if (r.status or 'open') == 'open' %}bg-[#ff0000]/5 border-[#ff0000]/25{% else %}bg-white/5{% endif %}">
+          <div class="flex flex-wrap items-start gap-3 justify-between">
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap gap-2 items-center mb-1">
+                <span class="text-[10px] uppercase tracking-wider font-semibold
+                  {% if (r.status or 'open') == 'open' %}text-yellow-400
+                  {% elif r.status == 'accepted' %}text-green-400
+                  {% elif r.status == 'false' %}text-red-400
+                  {% else %}text-gray-500{% endif %}">{{ r.status or 'open' }}</span>
+                <span class="text-[10px] text-gray-500">#{{ r.id }} · {{ r.created_at }}</span>
+                {% if r.reported_stato == 'sospeso' %}<span class="text-[10px] text-[#ff0000]">SOSPESO</span>{% endif %}
+              </div>
+              <div class="text-sm">
+                <strong>{{ r.reporter_nome or r.reporter_id }}</strong>
+                <span class="text-gray-500">→</span>
+                <strong class="text-[#ff0000]">{{ r.reported_nome or r.reported_id }}</strong>
+              </div>
+              <p class="text-sm text-gray-300 mt-2 whitespace-pre-wrap">{{ r.motivo }}</p>
+            </div>
+            <div class="flex flex-wrap gap-1.5 shrink-0">
+              {% if r.reported_id %}
+              <button type="button" onclick="openManage({{ r.reported_id }})" class="text-xs border border-white/20 px-3 py-1.5 rounded-lg">GESTISCI</button>
+              {% endif %}
+              {% if (r.status or 'open') == 'open' %}
+              <form method="post" action="/admin/reports/{{ r.id }}/accept" class="inline">
+                <button class="text-xs bg-green-700/40 border border-green-500/40 px-3 py-1.5 rounded-lg">VALIDA</button>
+              </form>
+              <form method="post" action="/admin/reports/{{ r.id }}/dismiss" class="inline">
+                <button class="text-xs bg-white/10 border border-white/20 px-3 py-1.5 rounded-lg">ARCHIVIA</button>
+              </form>
+              <form method="post" action="/admin/reports/{{ r.id }}/false" class="inline" onsubmit="return confirm('Segnare come falsa? Il reporter viene penalizzato.');">
+                <button class="text-xs bg-[#ff0000]/20 border border-[#ff0000]/40 text-[#ff0000] px-3 py-1.5 rounded-lg">FALSA</button>
+              </form>
+              {% endif %}
+              {% if r.reported_stato == 'sospeso' %}
+              <form method="post" action="/admin/reports/{{ r.id }}/unsuspend" class="inline" onsubmit="return confirm('Revocare la sospensione?');">
+                <button class="text-xs bg-blue-600/30 border border-blue-400/40 px-3 py-1.5 rounded-lg">TOGLI SOSPENSIONE</button>
+              </form>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        {% else %}
+        <div class="text-center text-gray-500 py-12 border border-white/10 rounded-xl">
+          <div class="text-3xl mb-2">⚠️</div>
+          Nessuna segnalazione
+        </div>
+        {% endfor %}
+      </div>
+
+      
+
       {% elif tab == 'blocchi' %}
       <h1 class="font-hot text-4xl tracking-wide mb-2">BLOCCHI</h1>
       <p class="text-gray-500 text-sm mb-6">Blocchi tra utenti</p>
@@ -565,6 +691,13 @@
 
       <!-- ========== BOT ========== -->
       {% elif tab == 'bot' %}
+      {% if request.query_params.get('ok') == 'created' %}
+      <div class="mb-4 text-sm text-green-400 bg-green-900/20 border border-green-500/30 rounded-xl px-4 py-2">✅ Bot generati: {{ request.query_params.get('n') or 1 }}</div>
+      {% endif %}
+      {% if request.query_params.get('err') %}
+      <div class="mb-4 text-sm text-red-400 bg-red-900/20 border border-red-500/30 rounded-xl px-4 py-2">Errore creazione bot</div>
+      {% endif %}
+
       <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div>
           <h1 class="font-hot text-4xl tracking-wide">BOT</h1>
@@ -580,45 +713,34 @@
 
       <div class="border border-white/10 rounded-2xl p-4 mb-6 bg-white/[0.03]">
         <div class="font-hot text-lg mb-3 text-[#ff0000]">+ NUOVO BOT</div>
-        <form method="post" action="/admin/bots/create" class="grid grid-cols-2 md:grid-cols-3 gap-3">
-          <div>
-            <label class="text-[10px] text-gray-500">NOME *</label>
-            <input name="nome" required class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
+        <form method="post" action="/admin/bots/create" class="border border-[#ff0000]/30 bg-[#ff0000]/5 rounded-xl p-5 grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+          <div class="md:col-span-4">
+            <h2 class="font-hot text-xl tracking-wide mb-1">🤖 GENERA BOT AUTOMATICO</h2>
+            <p class="text-xs text-gray-500">Scegli solo genere e orientamento. Nome, nick, email, età, città, bio, GPS e crediti vengono generati automaticamente.</p>
           </div>
           <div>
-            <label class="text-[10px] text-gray-500">USERNAME</label>
-            <input name="username" placeholder="bot_nome" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
-          </div>
-          <div>
-            <label class="text-[10px] text-gray-500">EMAIL</label>
-            <input name="email" type="email" placeholder="auto se vuoto" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
-          </div>
-          <div>
-            <label class="text-[10px] text-gray-500">PASSWORD</label>
-            <input name="password" value="bot1234" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
-          </div>
-          <div>
-            <label class="text-[10px] text-gray-500">GENERE</label>
-            <select name="genere" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
+            <label class="text-[10px] text-gray-500">GENERE *</label>
+            <select name="genere" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1 bg-black border border-white/15">
               <option value="donna">Donna</option>
               <option value="uomo">Uomo</option>
               <option value="altro">Altro</option>
             </select>
           </div>
           <div>
-            <label class="text-[10px] text-gray-500">CITTÀ</label>
-            <input name="citta" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
-          </div>
-          <div class="md:col-span-2">
-            <label class="text-[10px] text-gray-500">BIO</label>
-            <input name="bio" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
+            <label class="text-[10px] text-gray-500">ORIENTAMENTO *</label>
+            <select name="orientamento" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1 bg-black border border-white/15">
+              <option value="etero">Etero</option>
+              <option value="omo">Omo</option>
+              <option value="bi">Bi</option>
+              <option value="tutti">Tutti</option>
+            </select>
           </div>
           <div>
-            <label class="text-[10px] text-gray-500">CREDITI</label>
-            <input name="credits" type="number" value="50" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
+            <label class="text-[10px] text-gray-500">QUANTI (1–20)</label>
+            <input name="quanti" type="number" min="1" max="20" value="1" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1 bg-black border border-white/15">
           </div>
-          <div class="md:col-span-3">
-            <button type="submit" class="bg-[#ff0000] text-white font-semibold px-6 py-2.5 rounded-lg text-sm shadow-[0_0_16px_rgba(255,0,0,0.3)]">CREA BOT</button>
+          <div>
+            <button type="submit" class="w-full bg-[#ff0000] text-white font-semibold px-6 py-2.5 rounded-lg text-sm shadow-[0_0_16px_rgba(255,0,0,0.3)]">GENERA</button>
           </div>
         </form>
       </div>
@@ -665,7 +787,14 @@
       <h1 class="font-hot text-4xl tracking-wide mb-2">
         {% if tab == 'posts' %}POST
         {% elif tab == 'commenti' %}COMMENTI
-        {% elif tab == 'bot' %}BOT
+        {% elif tab == 'bot' %}
+      {% if request.query_params.get('ok') == 'created' %}
+      <div class="mb-4 text-sm text-green-400 bg-green-900/20 border border-green-500/30 rounded-xl px-4 py-2">✅ Bot generati: {{ request.query_params.get('n') or 1 }}</div>
+      {% endif %}
+      {% if request.query_params.get('err') %}
+      <div class="mb-4 text-sm text-red-400 bg-red-900/20 border border-red-500/30 rounded-xl px-4 py-2">Errore creazione bot</div>
+      {% endif %}
+BOT
         {% elif tab == 'annunci' %}ANNUNCI
         {% elif tab == 'social' %}SOCIAL
         {% elif tab == 'telefoni' %}TELEFONI
@@ -674,7 +803,14 @@
       <p class="text-gray-500 text-sm mb-6">
         {% if tab == 'posts' %}Contenuti pubblicati dagli utenti
         {% elif tab == 'commenti' %}Moderazione commenti
-        {% elif tab == 'bot' %}Profili automatici
+        {% elif tab == 'bot' %}
+      {% if request.query_params.get('ok') == 'created' %}
+      <div class="mb-4 text-sm text-green-400 bg-green-900/20 border border-green-500/30 rounded-xl px-4 py-2">✅ Bot generati: {{ request.query_params.get('n') or 1 }}</div>
+      {% endif %}
+      {% if request.query_params.get('err') %}
+      <div class="mb-4 text-sm text-red-400 bg-red-900/20 border border-red-500/30 rounded-xl px-4 py-2">Errore creazione bot</div>
+      {% endif %}
+Profili automatici
         {% elif tab == 'annunci' %}Moderazione annunci
         {% elif tab == 'social' %}Account social collegati
         {% elif tab == 'telefoni' %}Numeri verificati
@@ -684,7 +820,14 @@
         <div class="text-5xl mb-4 opacity-40">
           {% if tab == 'posts' %}📄
           {% elif tab == 'commenti' %}💬
-          {% elif tab == 'bot' %}🤖
+          {% elif tab == 'bot' %}
+      {% if request.query_params.get('ok') == 'created' %}
+      <div class="mb-4 text-sm text-green-400 bg-green-900/20 border border-green-500/30 rounded-xl px-4 py-2">✅ Bot generati: {{ request.query_params.get('n') or 1 }}</div>
+      {% endif %}
+      {% if request.query_params.get('err') %}
+      <div class="mb-4 text-sm text-red-400 bg-red-900/20 border border-red-500/30 rounded-xl px-4 py-2">Errore creazione bot</div>
+      {% endif %}
+🤖
           {% elif tab == 'annunci' %}📢
           {% elif tab == 'social' %}🔗
           {% elif tab == 'telefoni' %}📞

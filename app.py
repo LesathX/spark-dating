@@ -1511,21 +1511,76 @@ async def admin_panel(req: Request):
         online_users = [dict(r) for r in cur.fetchall()]
 
     gallery_items = []
+    gallery_folders = []
+    folder_user_id = None
+    folder_user = None
     gift_types = []
     gifts_recent = []
     blocks = []
 
+    gallery_folders = []  # [{user_id, nome, username, count, private_count}]
+    folder_user_id = None
+    folder_user = None
+
     if tab == "foto":
         try:
             cur.execute("""
-                SELECT p.*, u.nome as nome_user
+                SELECT p.user_id,
+                       u.nome as nome_user,
+                       u.username,
+                       u.email,
+                       COUNT(*) as cnt,
+                       SUM(CASE WHEN COALESCE(p.is_private,0)=1 THEN 1 ELSE 0 END) as private_cnt
                 FROM user_photos p
                 LEFT JOIN users u ON u.id = p.user_id
-                ORDER BY p.id DESC LIMIT 100
+                GROUP BY p.user_id, u.nome, u.username, u.email
+                ORDER BY u.nome NULLS LAST, p.user_id
             """)
-            gallery_items = [dict(r) for r in cur.fetchall()]
+            gallery_folders = [dict(r) for r in cur.fetchall()]
         except Exception as e:
-            print("admin foto:", e)
+            print("admin foto folders:", e)
+            try:
+                cur.execute("""
+                    SELECT DISTINCT p.user_id, u.nome as nome_user, u.username, u.email
+                    FROM user_photos p
+                    LEFT JOIN users u ON u.id = p.user_id
+                    ORDER BY u.nome NULLS LAST
+                """)
+                gallery_folders = []
+                for r in cur.fetchall():
+                    d = dict(r)
+                    d["cnt"] = 0
+                    d["private_cnt"] = 0
+                    gallery_folders.append(d)
+            except Exception as e2:
+                print("admin foto folders2:", e2)
+
+        # cartella aperta?
+        try:
+            fu = req.query_params.get("user")
+            if fu:
+                folder_user_id = int(fu)
+        except Exception:
+            folder_user_id = None
+
+        if folder_user_id:
+            try:
+                cur.execute(
+                    "SELECT id, nome, username, email FROM users WHERE id=%s",
+                    (folder_user_id,),
+                )
+                row = cur.fetchone()
+                folder_user = dict(row) if row else {"id": folder_user_id, "nome": f"User {folder_user_id}"}
+                cur.execute("""
+                    SELECT p.*, u.nome as nome_user
+                    FROM user_photos p
+                    LEFT JOIN users u ON u.id = p.user_id
+                    WHERE p.user_id=%s
+                    ORDER BY p.id DESC LIMIT 200
+                """, (folder_user_id,))
+                gallery_items = [dict(r) for r in cur.fetchall()]
+            except Exception as e:
+                print("admin foto folder content:", e)
 
     if tab == "doni":
         try:
@@ -1787,6 +1842,9 @@ async def admin_panel(req: Request):
         "recent_matches": recent_matches,
         "online_users": online_users,
         "gallery_items": gallery_items,
+        "gallery_folders": gallery_folders,
+        "folder_user_id": folder_user_id,
+        "folder_user": folder_user,
         "gift_types": gift_types,
         "gifts_recent": gifts_recent,
         "blocks": blocks,

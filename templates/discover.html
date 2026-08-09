@@ -9,7 +9,7 @@
     <style>
         body { background: #0a0a0a; font-family: 'Oswald', sans-serif; }
         .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
-        .text-red-pure { color: #ff1a1a; }
+        .text-red-pure { color: #ff0000; }
         .card-glow { box-shadow: 0 0 40px rgba(255,26,26,0.15); }
     </style>
 </head>
@@ -24,15 +24,16 @@
             <a href="/likes" class="relative w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-lg" title="Chi ti ha messo like">
                 ⭐
                 {% if likes_count and likes_count > 0 %}
-                <span class="absolute -top-1 -right-1 min-w-[16px] h-4 bg-[#ff1a1a] text-[9px] font-bold rounded-full flex items-center justify-center px-1">{{ likes_count }}</span>
+                <span class="absolute -top-1 -right-1 min-w-[16px] h-4 bg-[#ff0000] text-[9px] font-bold rounded-full flex items-center justify-center px-1">{{ likes_count }}</span>
                 {% endif %}
             </a>
             <a href="/notifications" class="relative w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-lg" title="Notifiche">
                 🔔
                 {% if unread and unread > 0 %}
-                <span class="absolute -top-1 -right-1 min-w-[16px] h-4 bg-[#ff1a1a] text-[9px] font-bold rounded-full flex items-center justify-center px-1">{{ unread if unread < 10 else '9+' }}</span>
+                <span class="absolute -top-1 -right-1 min-w-[16px] h-4 bg-[#ff0000] text-[9px] font-bold rounded-full flex items-center justify-center px-1">{{ unread if unread < 10 else '9+' }}</span>
                 {% endif %}
             </a>
+            <a href="/spells" class="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-lg" title="Incantesimi">✨</a>
             <button onclick="requestLocation()" id="gps-btn" class="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-sm" title="GPS">
                 {% if has_gps %}📍{% else %}📡{% endif %}
             </button>
@@ -41,8 +42,8 @@
 
     <!-- Filters bar -->
     <div class="max-w-md mx-auto px-4 pt-4 flex gap-2 overflow-x-auto">
-        <a href="/discover" class="shrink-0 px-4 py-1.5 rounded-full text-xs border {% if not only_online %}bg-[#ff1a1a] border-[#ff1a1a] text-white{% else %}border-white/15 text-gray-400{% endif %}">Tutti</a>
-        <a href="/discover?online=1" class="shrink-0 px-4 py-1.5 rounded-full text-xs border {% if only_online %}bg-[#ff1a1a] border-[#ff1a1a] text-white{% else %}border-white/15 text-gray-400{% endif %}">🟢 Solo online</a>
+        <a href="/discover" class="shrink-0 px-4 py-1.5 rounded-full text-xs border {% if not only_online %}bg-[#ff0000] border-[#ff0000] text-white{% else %}border-white/15 text-gray-400{% endif %}">Tutti</a>
+        <a href="/discover?online=1" class="shrink-0 px-4 py-1.5 rounded-full text-xs border {% if only_online %}bg-[#ff0000] border-[#ff0000] text-white{% else %}border-white/15 text-gray-400{% endif %}">🟢 Solo online</a>
         <a href="/profile" class="shrink-0 px-4 py-1.5 rounded-full text-xs border border-white/15 text-gray-400">📏 Raggio {{ distanza_max }}km</a>
     </div>
 
@@ -86,18 +87,22 @@
             </div>
 
             <!-- Action buttons -->
+            <div class="px-5 pb-2">
+                <input form="form-like" type="text" name="messaggio" maxlength="200" placeholder="Scrivi un messaggio col like (10 crediti)..."
+                       class="w-full bg-black/50 border border-[#ff0000]/30 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-500">
+            </div>
             <div class="flex items-center justify-center gap-4 py-6 px-4">
                 <form method="post" action="/swipe">
                     <input type="hidden" name="to_user_id" value="{{ candidate.id }}">
                     <input type="hidden" name="tipo" value="dislike">
-                    <button class="w-14 h-14 rounded-full bg-white/10 border border-white/20 text-2xl hover:bg-[#ff1a1a] hover:border-[#ff1a1a] transition" title="No">✕</button>
+                    <button class="w-14 h-14 rounded-full bg-white/10 border border-white/20 text-2xl hover:bg-[#ff0000] hover:border-[#ff0000] transition" title="No">✕</button>
                 </form>
                 <form method="post" action="/swipe">
                     <input type="hidden" name="to_user_id" value="{{ candidate.id }}">
                     <input type="hidden" name="tipo" value="superlike">
                     <button class="w-12 h-12 rounded-full bg-orange-500/20 border border-orange-500/40 text-xl text-orange-400 hover:bg-orange-500 hover:text-white transition" title="Super Like">⭐</button>
                 </form>
-                <form method="post" action="/swipe">
+                <form method="post" action="/swipe" id="form-like">
                     <input type="hidden" name="to_user_id" value="{{ candidate.id }}">
                     <input type="hidden" name="tipo" value="like">
                     <button class="w-16 h-16 rounded-full bg-[#22c55e] text-white text-3xl shadow-lg shadow-green-900/50 hover:scale-105 transition" title="Like">♥</button>
@@ -113,7 +118,7 @@
             <h2 class="font-hot text-3xl mb-2">Nessuno qui intorno</h2>
             <p class="text-gray-500 mb-6">Aumenta il raggio o disattiva “solo online”</p>
             <div class="flex flex-col gap-3 items-center">
-                <a href="/discover" class="bg-[#ff1a1a] px-8 py-3 rounded-xl font-semibold">Mostra tutti</a>
+                <a href="/discover" class="bg-[#ff0000] px-8 py-3 rounded-xl font-semibold">Mostra tutti</a>
                 <a href="/profile" class="text-gray-400 text-sm">Cambia distanza max →</a>
             </div>
         </div>
@@ -174,7 +179,7 @@
             ws.onmessage = (e) => {
                 const d = JSON.parse(e.data);
                 const t = document.createElement('div');
-                t.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);background:#ff1a1a;color:#fff;padding:12px 20px;border-radius:12px;z-index:99;font-family:Oswald,sans-serif;text-align:center;max-width:90%';
+                t.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);background:#ff0000;color:#fff;padding:12px 20px;border-radius:12px;z-index:99;font-family:Oswald,sans-serif;text-align:center;max-width:90%';
                 t.innerHTML = `<b>${d.title||'Notifica'}</b><br><span style="font-size:12px">${d.message||''}</span>`;
                 document.body.appendChild(t);
                 setTimeout(()=>{t.style.opacity='0';setTimeout(()=>t.remove(),300)},3500);

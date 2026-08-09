@@ -9,7 +9,7 @@
     <style>
         body { background-color: #0a0a0a; font-family: 'Oswald', sans-serif; }
         .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
-        .text-red-pure { color: #ff1a1a; }
+        .text-red-pure { color: #ff0000; }
     </style>
 </head>
 <body class="text-white min-h-screen pb-24">
@@ -27,7 +27,7 @@
         {% if notifications %}
         <div class="space-y-3">
             {% for n in notifications %}
-            <div class="bg-white/5 border border-white/10 rounded-2xl p-4 {% if not n.letto %}border-[#ff1a1a]/40{% endif %}">
+            <div class="bg-white/5 border border-white/10 rounded-2xl p-4 {% if not n.letto %}border-[#ff0000]/40{% endif %}">
                 <div class="flex items-start justify-between gap-3">
                     <div>
                         <div class="font-hot text-lg tracking-wide {% if not n.letto %}text-red-pure{% endif %}">
@@ -37,7 +37,7 @@
                         <p class="text-xs text-gray-600 mt-2">{{ n.data_creazione }}</p>
                     </div>
                     {% if not n.letto %}
-                    <span class="w-2.5 h-2.5 rounded-full bg-[#ff1a1a] shrink-0 mt-2"></span>
+                    <span class="w-2.5 h-2.5 rounded-full bg-[#ff0000] shrink-0 mt-2"></span>
                     {% endif %}
                 </div>
             </div>
@@ -88,7 +88,7 @@
             ws.onmessage = function(event) {
                 const data = JSON.parse(event.data);
                 const toast = document.createElement('div');
-                toast.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#ff1a1a;color:white;padding:14px 24px;border-radius:12px;z-index:9999;text-align:center;max-width:90%;font-family:Oswald,sans-serif;';
+                toast.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#ff0000;color:white;padding:14px 24px;border-radius:12px;z-index:9999;text-align:center;max-width:90%;font-family:Oswald,sans-serif;';
                 toast.innerHTML = `<strong>${data.title || 'Notifica'}</strong><br><span style="font-size:13px">${data.message || ''}</span>`;
                 document.body.appendChild(toast);
                 setTimeout(() => { toast.style.opacity='0'; setTimeout(() => toast.remove(), 400); }, 4000);

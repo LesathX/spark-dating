@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from fastapi import FastAPI, Request, Form, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -136,11 +136,141 @@ def haversine_km(lat1, lon1, lat2, lon2):
     a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
+
+# ============== INCANTESIMI (costi in crediti) ==============
+SPELLS = {
+    "superlike": {"cost": 5, "label": "Super Like"},
+    "messaggio_swipe": {"cost": 10, "label": "Messaggio al like"},
+    "rivela_likes": {"cost": 15, "label": "Rivela chi ti piace"},
+    "boost": {"cost": 20, "label": "Boost profilo"},
+}
+
+def spend_credits(user_id, amount, motivo, related_id=None):
+    """Scala crediti e registra transazione. Ritorna True se ok."""
+    if amount <= 0:
+        return True
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute("SELECT credits FROM users WHERE id=%s FOR UPDATE", (user_id,))
+        row = cur.fetchone()
+        if not row or (row["credits"] or 0) < amount:
+            c.rollback()
+            cur.close()
+            c.close()
+            return False
+        cur.execute("UPDATE users SET credits = credits - %s WHERE id=%s", (amount, user_id))
+        cur.execute(
+            "INSERT INTO credit_transactions (user_id, amount, motivo, related_id) VALUES (%s, %s, %s, %s)",
+            (user_id, -amount, motivo, related_id),
+        )
+        c.commit()
+        return True
+    except Exception as e:
+        c.rollback()
+        print("spend_credits error:", e)
+        return False
+    finally:
+        cur.close()
+        c.close()
+
+def add_credits(user_id, amount, motivo="ricarica"):
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute("UPDATE users SET credits = COALESCE(credits,0) + %s WHERE id=%s", (amount, user_id))
+        cur.execute(
+            "INSERT INTO credit_transactions (user_id, amount, motivo) VALUES (%s, %s, %s)",
+            (user_id, amount, motivo),
+        )
+        c.commit()
+    except Exception as e:
+        c.rollback()
+        print("add_credits error:", e)
+    finally:
+        cur.close()
+        c.close()
+
+def require_mod(req):
+    """Admin o moderatore."""
+    user = current_user(req)
+    if not user:
+        return None
+    if user.get("is_admin") or user.get("is_mod") or user.get("ruolo") in ("admin", "mod"):
+        return user
+    return None
+
 def require_admin(req):
     user = current_user(req)
-    if not user or not user.get("is_admin"):
+    if not user:
         return None
-    return user
+    if user.get("is_admin") or user.get("role") == "admin":
+        return user
+    return None
+
+def require_staff(req):
+    """Admin or moderator"""
+    user = current_user(req)
+    if not user:
+        return None
+    role = user.get("role") or ("admin" if user.get("is_admin") else "user")
+    if role in ("admin", "mod") or user.get("is_admin"):
+        return user
+    return None
+
+def get_role(user):
+    if not user:
+        return "user"
+    if user.get("is_admin") or user.get("role") == "admin":
+        return "admin"
+    if user.get("role") == "mod":
+        return "mod"
+    return "user"
+
+def add_credits(user_id, amount, motivo=""):
+    c = db()
+    cur = c.cursor()
+    cur.execute("UPDATE users SET credits = COALESCE(credits,0) + %s WHERE id=%s RETURNING credits", (amount, user_id))
+    row = cur.fetchone()
+    cur.execute("INSERT INTO credit_transactions (user_id, amount, motivo) VALUES (%s,%s,%s)", (user_id, amount, motivo))
+    c.commit()
+    cur.close()
+    c.close()
+    return row["credits"] if row else None
+
+def spend_credits(user_id, amount, motivo=""):
+    c = db()
+    cur = c.cursor()
+    cur.execute("SELECT COALESCE(credits,0) as credits FROM users WHERE id=%s", (user_id,))
+    row = cur.fetchone()
+    if not row or row["credits"] < amount:
+        cur.close()
+        c.close()
+        return False, row["credits"] if row else 0
+    cur.execute("UPDATE users SET credits = credits - %s WHERE id=%s RETURNING credits", (amount, user_id))
+    new_c = cur.fetchone()["credits"]
+    cur.execute("INSERT INTO credit_transactions (user_id, amount, motivo) VALUES (%s,%s,%s)", (user_id, -amount, motivo))
+    c.commit()
+    cur.close()
+    c.close()
+    return True, new_c
+
+def active_spell(user_id, spell_code):
+    try:
+        c = db()
+        cur = c.cursor()
+        cur.execute("""
+            SELECT * FROM spell_uses
+            WHERE user_id=%s AND spell_code=%s
+              AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+            ORDER BY created_at DESC LIMIT 1
+        """, (user_id, spell_code))
+        row = cur.fetchone()
+        cur.close()
+        c.close()
+        return dict(row) if row else None
+    except Exception:
+        return None
 
 @app.websocket("/ws/{uid}")
 async def ws_endpoint(websocket: WebSocket, uid: int):
@@ -370,12 +500,39 @@ async def discover(req: Request):
     })
 
 @app.post("/swipe")
-async def swipe(req: Request, to_user_id: int = Form(...), tipo: str = Form(...)):
+async def swipe(req: Request, to_user_id: int = Form(...), tipo: str = Form(...), messaggio: str = Form("")):
     user = current_user(req)
     if not user:
         return RedirectResponse("/login", 303)
     if tipo not in ("like", "dislike", "superlike"):
         return RedirectResponse("/discover", 303)
+
+    # Superlike costa crediti
+    if tipo == "superlike":
+        cost = SPELLS["superlike"]["cost"]
+        if not spend_credits(user["id"], cost, "superlike", to_user_id):
+            return RedirectResponse("/discover?err=crediti", 303)
+
+    # Messaggio al like costa crediti
+    messaggio = (messaggio or "").strip()
+    if messaggio and tipo in ("like", "superlike"):
+        cost = SPELLS["messaggio_swipe"]["cost"]
+        if not spend_credits(user["id"], cost, "messaggio_swipe", to_user_id):
+            messaggio = ""  # senza crediti non invia messaggio ma fa comunque like
+        else:
+            try:
+                c0 = db()
+                cur0 = c0.cursor()
+                cur0.execute(
+                    "INSERT INTO swipe_messages (from_user_id,to_user_id,contenuto,credits_spent) VALUES (%s,%s,%s,%s)",
+                    (user["id"], to_user_id, messaggio[:500], SPELLS["messaggio_swipe"]["cost"]),
+                )
+                c0.commit()
+                cur0.close()
+                c0.close()
+            except Exception as e:
+                print("swipe_message error:", e)
+
     c = db()
     cur = c.cursor()
     match_created = False
@@ -389,7 +546,22 @@ async def swipe(req: Request, to_user_id: int = Form(...), tipo: str = Form(...)
                 row = cur.fetchone()
                 if row:
                     mid = row["id"]
-                    cur.execute("INSERT INTO conversations (match_id) VALUES (%s)", (mid,))
+                    cur.execute("INSERT INTO conversations (match_id) VALUES (%s) RETURNING id", (mid,))
+                    conv_row = cur.fetchone()
+                    conv_id = conv_row["id"] if conv_row else None
+                    # consegna eventuali messaggi swipe pagati
+                    if conv_id:
+                        cur.execute("""
+                            SELECT id, from_user_id, contenuto FROM swipe_messages
+                            WHERE ((from_user_id=%s AND to_user_id=%s) OR (from_user_id=%s AND to_user_id=%s))
+                              AND delivered=0
+                        """, (user["id"], to_user_id, to_user_id, user["id"]))
+                        for sm in cur.fetchall():
+                            cur.execute(
+                                "INSERT INTO messages (conversation_id,sender_id,tipo,contenuto) VALUES (%s,%s,'testo',%s)",
+                                (conv_id, sm["from_user_id"], sm["contenuto"]),
+                            )
+                            cur.execute("UPDATE swipe_messages SET delivered=1 WHERE id=%s", (sm["id"],))
                     for uid in (user["id"], to_user_id):
                         cur.execute("INSERT INTO notifications (user_id,tipo,titolo,contenuto,related_id) VALUES (%s,'nuovo_match','Nuovo Match!','Hai un nuovo match!',%s)", (uid, mid))
                     match_created = True
@@ -742,14 +914,14 @@ async def admin_panel(req: Request):
         if q:
             like = f"%{q}%"
             cur.execute("""
-                SELECT id, nome, username, email, stato, is_admin, is_online, latitude, longitude
+                SELECT id, nome, username, email, stato, is_admin, is_mod, credits, is_online, latitude, longitude
                 FROM users
                 WHERE nome ILIKE %s OR email ILIKE %s OR username ILIKE %s
                 ORDER BY id DESC LIMIT 100
             """, (like, like, like))
         else:
             cur.execute("""
-                SELECT id, nome, username, email, stato, is_admin, is_online, latitude, longitude
+                SELECT id, nome, username, email, stato, is_admin, is_mod, credits, is_online, latitude, longitude
                 FROM users ORDER BY id DESC LIMIT 100
             """)
         users = [dict(u) for u in cur.fetchall()]
@@ -912,4 +1084,242 @@ async def admin_remove_admin(req: Request, user_id: int):
     cur.close()
     c.close()
     return RedirectResponse("/admin", 303)
+
+
+
+# ============== FOTO PROFILO ==============
+@app.get("/photos", response_class=HTMLResponse)
+async def photos_page(req: Request):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute("SELECT * FROM user_photos WHERE user_id=%s ORDER BY is_private, ordine, id", (user["id"],))
+        photos = [dict(p) for p in cur.fetchall()]
+    except Exception:
+        photos = []
+    cur.close()
+    c.close()
+    return templates.TemplateResponse("photos.html", {
+        "request": req, "user": user, "photos": photos, "unread": unread_count(user["id"])
+    })
+
+
+@app.post("/photos/add")
+async def photos_add(req: Request, url: str = Form(...), is_private: int = Form(0)):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    url = url.strip()
+    if not url.startswith("http"):
+        return RedirectResponse("/photos?err=url", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute(
+            "INSERT INTO user_photos (user_id, url, is_private) VALUES (%s, %s, %s)",
+            (user["id"], url[:500], 1 if is_private else 0),
+        )
+        if not is_private:
+            cur.execute("UPDATE users SET foto_principale_url=%s WHERE id=%s AND (foto_principale_url IS NULL OR foto_principale_url='')", (url[:500], user["id"]))
+        c.commit()
+    except Exception as e:
+        c.rollback()
+        print("photos_add:", e)
+    finally:
+        cur.close()
+        c.close()
+    return RedirectResponse("/photos", 303)
+
+
+@app.post("/photos/delete/{photo_id}")
+async def photos_delete(req: Request, photo_id: int):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    cur.execute("DELETE FROM user_photos WHERE id=%s AND user_id=%s", (photo_id, user["id"]))
+    c.commit()
+    cur.close()
+    c.close()
+    return RedirectResponse("/photos", 303)
+
+
+# ============== INCANTESIMI ==============
+@app.get("/spells", response_class=HTMLResponse)
+async def spells_page(req: Request):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    # refresh credits
+    c = db()
+    cur = c.cursor()
+    cur.execute("SELECT credits FROM users WHERE id=%s", (user["id"],))
+    row = cur.fetchone()
+    user["credits"] = row["credits"] if row else 0
+    cur.execute(
+        "SELECT * FROM credit_transactions WHERE user_id=%s ORDER BY created_at DESC LIMIT 20",
+        (user["id"],),
+    )
+    txs = [dict(t) for t in cur.fetchall()]
+    cur.close()
+    c.close()
+    return templates.TemplateResponse("spells.html", {
+        "request": req, "user": user, "spells": SPELLS, "txs": txs, "unread": unread_count(user["id"])
+    })
+
+
+@app.post("/spells/cast")
+async def spells_cast(req: Request, spell: str = Form(...)):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    if spell not in SPELLS:
+        return RedirectResponse("/spells", 303)
+    cost = SPELLS[spell]["cost"]
+    if spell == "rivela_likes":
+        if not spend_credits(user["id"], cost, "rivela_likes"):
+            return RedirectResponse("/spells?err=crediti", 303)
+        return RedirectResponse("/likes?unlocked=1", 303)
+    if spell == "boost":
+        if not spend_credits(user["id"], cost, "boost"):
+            return RedirectResponse("/spells?err=crediti", 303)
+        # semplice: segna notification
+        try:
+            c = db()
+            cur = c.cursor()
+            cur.execute(
+                "INSERT INTO notifications (user_id,tipo,titolo,contenuto) VALUES (%s,'boost','Boost attivo','Il tuo profilo e in evidenza!')",
+                (user["id"],),
+            )
+            c.commit()
+            cur.close()
+            c.close()
+        except Exception:
+            pass
+        return RedirectResponse("/spells?ok=boost", 303)
+    return RedirectResponse("/spells", 303)
+
+
+@app.post("/admin/credits/{user_id}")
+async def admin_credits(req: Request, user_id: int, amount: int = Form(...)):
+    if not require_admin(req):
+        return RedirectResponse("/login", 303)
+    add_credits(user_id, amount, "admin_ricarica")
+    return RedirectResponse("/admin", 303)
+
+
+@app.post("/admin/make_mod/{user_id}")
+async def admin_make_mod(req: Request, user_id: int):
+    if not require_admin(req):
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    cur.execute("UPDATE users SET is_mod=1, ruolo='mod' WHERE id=%s AND COALESCE(is_admin,0)=0", (user_id,))
+    c.commit()
+    cur.close()
+    c.close()
+    return RedirectResponse("/admin", 303)
+
+
+@app.post("/admin/remove_mod/{user_id}")
+async def admin_remove_mod(req: Request, user_id: int):
+    if not require_admin(req):
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    cur.execute("UPDATE users SET is_mod=0, ruolo='user' WHERE id=%s", (user_id,))
+    c.commit()
+    cur.close()
+    c.close()
+    return RedirectResponse("/admin", 303)
+
+
+# ============== BACKUP ==============
+@app.get("/admin/backup")
+async def admin_backup(req: Request):
+    import json
+    from fastapi.responses import Response
+    admin = require_admin(req)
+    if not admin:
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    data = {}
+    for table in ("users", "matches", "messages", "conversations", "swipes", "notifications", "user_photos", "credit_transactions"):
+        try:
+            cur.execute(f"SELECT * FROM {table}")
+            rows = cur.fetchall()
+            data[table] = []
+            for r in rows:
+                d = dict(r)
+                for k, v in list(d.items()):
+                    if hasattr(v, "isoformat"):
+                        d[k] = v.isoformat()
+                # non esportare password hash in chiaro oltre il necessario - le includiamo per restore
+                data[table].append(d)
+        except Exception as e:
+            data[table] = {"error": str(e)}
+    try:
+        cur.execute(
+            "INSERT INTO backups_log (tipo, note, created_by) VALUES ('manual', 'backup manuale admin', %s)",
+            (admin["id"],),
+        )
+        c.commit()
+    except Exception:
+        c.rollback()
+    cur.close()
+    c.close()
+    payload = json.dumps(data, ensure_ascii=False, indent=2)
+    return Response(
+        content=payload,
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=mycheating_backup.json"},
+    )
+
+
+@app.get("/admin/backup/auto")
+async def admin_backup_auto(req: Request):
+    """Endpoint per cron giornaliero. Usa header X-Backup-Secret o query secret."""
+    import json
+    from datetime import datetime
+    secret = req.query_params.get("secret") or req.headers.get("X-Backup-Secret")
+    expected = os.environ.get("BACKUP_SECRET", "mycheating_backup_secret_2026")
+    if secret != expected:
+        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    c = db()
+    cur = c.cursor()
+    data = {"created_at": datetime.utcnow().isoformat(), "tipo": "auto"}
+    for table in ("users", "matches", "messages", "conversations", "swipes"):
+        try:
+            cur.execute(f"SELECT * FROM {table}")
+            rows = []
+            for r in cur.fetchall():
+                d = dict(r)
+                for k, v in list(d.items()):
+                    if hasattr(v, "isoformat"):
+                        d[k] = v.isoformat()
+                rows.append(d)
+            data[table] = rows
+        except Exception as e:
+            data[table] = []
+    try:
+        cur.execute("INSERT INTO backups_log (tipo, note) VALUES ('auto', 'backup automatico giornaliero')")
+        c.commit()
+    except Exception:
+        c.rollback()
+    cur.close()
+    c.close()
+    # salva su filesystem se possibile
+    try:
+        backup_dir = BASE_DIR / "backups"
+        backup_dir.mkdir(exist_ok=True)
+        fname = backup_dir / f"auto_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
+        fname.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    except Exception as e:
+        print("auto backup write:", e)
+    return JSONResponse({"ok": True, "tables": list(data.keys())})
 

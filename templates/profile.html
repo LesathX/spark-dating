@@ -9,8 +9,8 @@
     <style>
         body { background-color: #0a0a0a; font-family: 'Oswald', sans-serif; }
         .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
-        .text-red-pure { color: #ff1a1a; }
-        input:focus, select:focus, textarea:focus { border-color: #ff1a1a !important; outline: none; }
+        .text-red-pure { color: #ff0000; }
+        input:focus, select:focus, textarea:focus { border-color: #ff0000 !important; outline: none; }
     </style>
 </head>
 <body class="text-white min-h-screen pb-24">
@@ -41,11 +41,21 @@
             </div>
         </div>
 
+        <div class="grid grid-cols-2 gap-3 mb-6">
+            <a href="/photos" class="bg-white/5 border border-white/10 rounded-xl p-4 text-center hover:border-[#ff0000]/40">
+                <div class="text-2xl mb-1">📷</div>
+                <div class="text-xs text-gray-400">Foto</div>
+            </a>
+            <a href="/spells" class="bg-white/5 border border-white/10 rounded-xl p-4 text-center hover:border-[#ff0000]/40">
+                <div class="text-2xl mb-1">✨</div>
+                <div class="text-xs text-gray-400">Incantesimi</div>
+            </a>
+        </div>
         <!-- GPS button -->
         <div class="bg-white/5 border border-white/10 rounded-2xl p-5 mb-6">
             <h2 class="font-hot text-xl tracking-wide mb-2">POSIZIONE</h2>
             <p class="text-gray-500 text-sm mb-4">Attiva il GPS per vedere utenti vicini a te</p>
-            <button type="button" id="gps-btn" onclick="requestLocation()" class="w-full bg-[#ff1a1a] text-white font-semibold py-3.5 rounded-xl tracking-wide">
+            <button type="button" id="gps-btn" onclick="requestLocation()" class="w-full bg-[#ff0000] text-white font-semibold py-3.5 rounded-xl tracking-wide">
                 {% if user.latitude %}📍 AGGIORNA POSIZIONE{% else %}📍 ATTIVA GPS{% endif %}
             </button>
             <p id="gps-msg" class="text-xs text-gray-500 mt-3 text-center"></p>
@@ -70,7 +80,7 @@
                 <input type="number" name="distanza_max" min="1" max="500" value="{{ prefs.distanza_max if prefs and prefs.distanza_max else 50 }}"
                        class="w-full bg-transparent border border-white/15 text-white placeholder-gray-500 rounded-xl px-4 py-3 text-sm">
             </div>
-            <button type="submit" class="w-full bg-[#ff1a1a] text-white font-semibold py-3.5 rounded-xl tracking-wide">SALVA</button>
+            <button type="submit" class="w-full bg-[#ff0000] text-white font-semibold py-3.5 rounded-xl tracking-wide">SALVA</button>
         </form>
 
         <form method="post" action="/profile/interessi" class="bg-white/5 border border-white/10 rounded-2xl p-6 mb-6">
@@ -79,7 +89,7 @@
                 {% for i in all_interests %}
                 <label class="cursor-pointer">
                     <input type="checkbox" name="interessi" value="{{ i.id }}" class="peer sr-only" {% if i.nome in interessi %}checked{% endif %}>
-                    <span class="inline-block px-3 py-1.5 rounded-full text-sm border transition peer-checked:bg-[#ff1a1a] peer-checked:text-white peer-checked:border-[#ff1a1a] bg-white/5 text-gray-400 border-white/15">{{ i.nome }}</span>
+                    <span class="inline-block px-3 py-1.5 rounded-full text-sm border transition peer-checked:bg-[#ff0000] peer-checked:text-white peer-checked:border-[#ff0000] bg-white/5 text-gray-400 border-white/15">{{ i.nome }}</span>
                 </label>
                 {% endfor %}
             </div>
@@ -165,7 +175,7 @@
             ws.onmessage = function(event) {
                 const data = JSON.parse(event.data);
                 const toast = document.createElement('div');
-                toast.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#ff1a1a;color:white;padding:14px 24px;border-radius:12px;z-index:9999;text-align:center;max-width:90%;font-family:Oswald,sans-serif;';
+                toast.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#ff0000;color:white;padding:14px 24px;border-radius:12px;z-index:9999;text-align:center;max-width:90%;font-family:Oswald,sans-serif;';
                 toast.innerHTML = `<strong>${data.title || 'Notifica'}</strong><br><span style="font-size:13px">${data.message || ''}</span>`;
                 document.body.appendChild(toast);
                 setTimeout(() => { toast.style.opacity='0'; setTimeout(() => toast.remove(), 400); }, 4000);

@@ -9,8 +9,8 @@
     <style>
         body { background: #0a0a0a; font-family: 'Oswald', sans-serif; }
         .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
-        .text-red-pure { color: #ff1a1a; }
-        input:focus, select:focus { border-color: #ff1a1a !important; outline: none; }
+        .text-red-pure { color: #ff0000; }
+        input:focus, select:focus { border-color: #ff0000 !important; outline: none; }
     </style>
 </head>
 <body class="text-white min-h-screen pb-28">
@@ -20,14 +20,17 @@
         <div class="font-hot text-xl tracking-wider flex items-center gap-2">
             <span class="text-red-pure">⚙️</span> ADMIN
         </div>
-        <a href="/discover" class="text-sm text-gray-400 hover:text-white">← App</a>
+        <div class="flex gap-2 items-center">
+            <a href="/admin/backup" class="text-xs bg-[#ff0000] text-white px-3 py-1.5 rounded-lg font-semibold">Backup</a>
+            <a href="/discover" class="text-sm text-gray-400 hover:text-white">← App</a>
+        </div>
     </div>
 
     <div class="max-w-5xl mx-auto px-4 py-6">
 
         <!-- Stats -->
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-            <div class="bg-gradient-to-br from-[#ff1a1a]/20 to-transparent border border-[#ff1a1a]/30 rounded-2xl p-4 text-center">
+            <div class="bg-gradient-to-br from-[#ff0000]/20 to-transparent border border-[#ff0000]/30 rounded-2xl p-4 text-center">
                 <div class="text-3xl font-hot text-red-pure">{{ stats.users }}</div>
                 <div class="text-[10px] text-gray-500 tracking-widest mt-1">UTENTI</div>
             </div>
@@ -65,16 +68,16 @@
         <form method="get" action="/admin" class="mb-6 flex gap-2">
             <input type="text" name="q" value="{{ q or '' }}" placeholder="Cerca nome, email, username..."
                    class="flex-1 bg-white/5 border border-white/15 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500">
-            <button class="bg-[#ff1a1a] px-5 py-3 rounded-xl font-semibold text-sm">Cerca</button>
+            <button class="bg-[#ff0000] px-5 py-3 rounded-xl font-semibold text-sm">Cerca</button>
             {% if q %}<a href="/admin" class="bg-white/10 px-4 py-3 rounded-xl text-sm flex items-center">✕</a>{% endif %}
         </form>
 
         <!-- Tabs -->
         <div class="flex gap-2 mb-5 overflow-x-auto text-sm">
-            <a href="/admin" class="shrink-0 px-4 py-2 rounded-full {% if not tab or tab == 'users' %}bg-[#ff1a1a] text-white{% else %}bg-white/5 text-gray-400 border border-white/10{% endif %}">Utenti</a>
-            <a href="/admin?tab=messages" class="shrink-0 px-4 py-2 rounded-full {% if tab == 'messages' %}bg-[#ff1a1a] text-white{% else %}bg-white/5 text-gray-400 border border-white/10{% endif %}">Messaggi</a>
-            <a href="/admin?tab=matches" class="shrink-0 px-4 py-2 rounded-full {% if tab == 'matches' %}bg-[#ff1a1a] text-white{% else %}bg-white/5 text-gray-400 border border-white/10{% endif %}">Match</a>
-            <a href="/admin?tab=online" class="shrink-0 px-4 py-2 rounded-full {% if tab == 'online' %}bg-[#ff1a1a] text-white{% else %}bg-white/5 text-gray-400 border border-white/10{% endif %}">Online</a>
+            <a href="/admin" class="shrink-0 px-4 py-2 rounded-full {% if not tab or tab == 'users' %}bg-[#ff0000] text-white{% else %}bg-white/5 text-gray-400 border border-white/10{% endif %}">Utenti</a>
+            <a href="/admin?tab=messages" class="shrink-0 px-4 py-2 rounded-full {% if tab == 'messages' %}bg-[#ff0000] text-white{% else %}bg-white/5 text-gray-400 border border-white/10{% endif %}">Messaggi</a>
+            <a href="/admin?tab=matches" class="shrink-0 px-4 py-2 rounded-full {% if tab == 'matches' %}bg-[#ff0000] text-white{% else %}bg-white/5 text-gray-400 border border-white/10{% endif %}">Match</a>
+            <a href="/admin?tab=online" class="shrink-0 px-4 py-2 rounded-full {% if tab == 'online' %}bg-[#ff0000] text-white{% else %}bg-white/5 text-gray-400 border border-white/10{% endif %}">Online</a>
         </div>
 
         {% if not tab or tab == 'users' %}
@@ -129,6 +132,19 @@
                                     <form method="post" action="/admin/make_admin/{{ u.id }}">
                                         <button class="text-[10px] bg-white/10 text-gray-300 px-2 py-1 rounded">Admin+</button>
                                     </form>
+                                    {% if not u.is_mod %}
+                                    <form method="post" action="/admin/make_mod/{{ u.id }}">
+                                        <button class="text-[10px] bg-orange-500/20 text-orange-300 px-2 py-1 rounded">Mod+</button>
+                                    </form>
+                                    {% else %}
+                                    <form method="post" action="/admin/remove_mod/{{ u.id }}">
+                                        <button class="text-[10px] bg-orange-500/10 text-orange-400/70 px-2 py-1 rounded">Mod−</button>
+                                    </form>
+                                    {% endif %}
+                                    <form method="post" action="/admin/credits/{{ u.id }}" class="inline-flex gap-1">
+                                        <input type="number" name="amount" value="50" class="w-12 bg-black/40 border border-white/10 rounded text-[10px] px-1">
+                                        <button class="text-[10px] bg-[#ff0000]/30 text-[#ff0000] px-2 py-1 rounded">+CR</button>
+                                    </form>
                                     <form method="post" action="/admin/delete/{{ u.id }}" onsubmit="return confirm('Eliminare {{ u.nome }}?')">
                                         <button class="text-[10px] bg-white/5 text-gray-500 px-2 py-1 rounded">Del</button>
                                     </form>
@@ -164,7 +180,7 @@
             <div class="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3 max-h-[60vh] overflow-y-auto mb-8">
                 {% for m in thread_messages %}
                 <div class="text-sm {% if m.sender_id == open_conversation.user1_id %}text-right{% endif %}">
-                    <div class="inline-block max-w-[85%] px-3 py-2 rounded-xl {% if m.sender_id == open_conversation.user1_id %}bg-[#ff1a1a]/30{% else %}bg-white/10{% endif %}">
+                    <div class="inline-block max-w-[85%] px-3 py-2 rounded-xl {% if m.sender_id == open_conversation.user1_id %}bg-[#ff0000]/30{% else %}bg-white/10{% endif %}">
                         <div class="text-[10px] text-gray-400 mb-0.5">{{ m.sender_nome }} · {{ m.data_invio }}</div>
                         <div>{{ m.contenuto }}</div>
                     </div>
@@ -177,7 +193,7 @@
         {% else %}
         <div class="space-y-2 mb-8">
             {% for c in conversations %}
-            <a href="/admin?tab=messages&conv={{ c.id }}" class="block bg-white/5 border border-white/10 rounded-xl p-4 hover:border-[#ff1a1a]/40 transition">
+            <a href="/admin?tab=messages&conv={{ c.id }}" class="block bg-white/5 border border-white/10 rounded-xl p-4 hover:border-[#ff0000]/40 transition">
                 <div class="flex justify-between items-start gap-2">
                     <div>
                         <div class="font-hot text-base">{{ c.nome1 }} <span class="text-red-pure">↔</span> {{ c.nome2 }}</div>

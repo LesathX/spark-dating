@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Foto – MyCheating</title>
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: #0a0a0a; font-family: 'Oswald', sans-serif; }
+        .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
+        .text-red-pure { color: #ff0000; }
+        .bg-red-hot { background: #ff0000; }
+        input:focus { border-color: #ff0000 !important; outline: none; }
+    </style>
+</head>
+<body class="text-white min-h-screen pb-28">
+    <div class="sticky top-0 z-20 bg-[#0a0a0a]/95 border-b border-white/10 px-4 py-3 flex justify-between items-center">
+        <div class="font-hot text-xl tracking-wider"><span class="text-red-pure">📷</span> LE TUE FOTO</div>
+        <a href="/profile" class="text-sm text-gray-400">← Profilo</a>
+    </div>
+    <div class="max-w-md mx-auto px-4 py-6">
+        <form method="post" action="/photos/add" class="bg-white/5 border border-white/10 rounded-2xl p-4 mb-6 space-y-3">
+            <h2 class="font-hot text-lg">AGGIUNGI FOTO</h2>
+            <p class="text-xs text-gray-500">Incolla un URL immagine (Imgur, Catbox, ecc.)</p>
+            <input type="url" name="url" required placeholder="https://..." class="w-full bg-transparent border border-white/15 rounded-xl px-4 py-3 text-sm">
+            <label class="flex items-center gap-2 text-sm text-gray-300">
+                <input type="checkbox" name="is_private" value="1" class="accent-[#ff0000]">
+                Foto privata (solo match)
+            </label>
+            <button class="w-full bg-red-hot text-white font-semibold py-3 rounded-xl">Carica</button>
+        </form>
+
+        <h2 class="font-hot text-lg mb-3">PUBBLICHE</h2>
+        <div class="grid grid-cols-2 gap-3 mb-6">
+            {% for p in photos if not p.is_private %}
+            <div class="relative rounded-xl overflow-hidden border border-white/10 aspect-square bg-black">
+                <img src="{{ p.url }}" class="w-full h-full object-cover" alt="">
+                <form method="post" action="/photos/delete/{{ p.id }}" class="absolute top-2 right-2">
+                    <button class="bg-black/70 text-white text-xs px-2 py-1 rounded">✕</button>
+                </form>
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-sm col-span-2">Nessuna foto pubblica</p>
+            {% endfor %}
+        </div>
+
+        <h2 class="font-hot text-lg mb-3">PRIVATE 🔒</h2>
+        <div class="grid grid-cols-2 gap-3">
+            {% for p in photos if p.is_private %}
+            <div class="relative rounded-xl overflow-hidden border border-[#ff0000]/30 aspect-square bg-black">
+                <img src="{{ p.url }}" class="w-full h-full object-cover" alt="">
+                <div class="absolute bottom-0 left-0 right-0 bg-black/70 text-[10px] text-center py-1 text-red-pure">PRIVATA</div>
+                <form method="post" action="/photos/delete/{{ p.id }}" class="absolute top-2 right-2">
+                    <button class="bg-black/70 text-white text-xs px-2 py-1 rounded">✕</button>
+                </form>
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-sm col-span-2">Nessuna foto privata</p>
+            {% endfor %}
+        </div>
+    </div>
+    <nav class="fixed bottom-0 left-0 right-0 bg-[#0a0a0a]/95 border-t border-white/10 z-20">
+        <div class="max-w-md mx-auto grid grid-cols-5 h-[72px] text-[10px]">
+            <a href="/discover" class="flex flex-col items-center justify-center text-gray-500 gap-0.5"><span class="text-xl">🔥</span> Scopri</a>
+            <a href="/spells" class="flex flex-col items-center justify-center text-gray-500 gap-0.5"><span class="text-xl">✨</span> Magie</a>
+            <a href="/chats" class="flex flex-col items-center justify-center text-gray-500 gap-0.5"><span class="text-xl">💬</span> Chat</a>
+            <a href="/matches" class="flex flex-col items-center justify-center text-gray-500 gap-0.5"><span class="text-xl">♥</span> Match</a>
+            <a href="/profile" class="flex flex-col items-center justify-center text-red-pure gap-0.5"><span class="text-xl">👤</span> Tu</a>
+        </div>
+    </nav>
+</body>
+</html>

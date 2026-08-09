@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Incantesimi – MyCheating</title>
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: #0a0a0a; font-family: 'Oswald', sans-serif; }
+        .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
+        .text-red-pure { color: #ff0000; }
+        .bg-red-hot { background: #ff0000; }
+    </style>
+</head>
+<body class="text-white min-h-screen pb-28">
+    <div class="sticky top-0 z-20 bg-[#0a0a0a]/95 border-b border-white/10 px-4 py-3 flex justify-between items-center">
+        <div class="font-hot text-xl tracking-wider"><span class="text-red-pure">✨</span> INCANTESIMI</div>
+        <div class="bg-[#ff0000]/20 border border-[#ff0000]/40 text-[#ff0000] px-3 py-1 rounded-full text-sm font-hot">
+            {{ user.credits or 0 }} crediti
+        </div>
+    </div>
+    <div class="max-w-md mx-auto px-4 py-6 space-y-4">
+        {% if request.query_params.get('err') == 'crediti' %}
+        <div class="bg-red-500/20 border border-red-500 text-red-300 text-center py-2 rounded-xl text-sm">Crediti insufficienti</div>
+        {% endif %}
+        {% if request.query_params.get('ok') %}
+        <div class="bg-green-500/20 border border-green-500/40 text-green-300 text-center py-2 rounded-xl text-sm">Incantesimo attivato!</div>
+        {% endif %}
+
+        <p class="text-gray-400 text-sm">Usa i crediti per poteri speciali. Super Like e messaggio al like si attivano da Scopri.</p>
+
+        {% for key, s in spells.items() %}
+        <div class="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between gap-3">
+            <div>
+                <div class="font-hot text-lg">{{ s.label }}</div>
+                <div class="text-xs text-gray-500">Costo: <span class="text-red-pure">{{ s.cost }} crediti</span></div>
+            </div>
+            {% if key in ('rivela_likes', 'boost') %}
+            <form method="post" action="/spells/cast">
+                <input type="hidden" name="spell" value="{{ key }}">
+                <button class="bg-red-hot text-white px-4 py-2 rounded-xl text-sm font-semibold">Lancia</button>
+            </form>
+            {% else %}
+            <span class="text-xs text-gray-500">Da Scopri</span>
+            {% endif %}
+        </div>
+        {% endfor %}
+
+        <h2 class="font-hot text-xl mt-8 mb-2">STORICO CREDITI</h2>
+        <div class="space-y-2">
+            {% for t in txs %}
+            <div class="flex justify-between text-sm border-b border-white/5 py-2">
+                <span class="text-gray-400">{{ t.motivo }}</span>
+                <span class="{% if t.amount > 0 %}text-green-400{% else %}text-red-pure{% endif %}">
+                    {% if t.amount > 0 %}+{% endif %}{{ t.amount }}
+                </span>
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-sm">Nessuna transazione</p>
+            {% endfor %}
+        </div>
+    </div>
+    <nav class="fixed bottom-0 left-0 right-0 bg-[#0a0a0a]/95 border-t border-white/10 z-20">
+        <div class="max-w-md mx-auto grid grid-cols-5 h-[72px] text-[10px]">
+            <a href="/discover" class="flex flex-col items-center justify-center text-gray-500 gap-0.5"><span class="text-xl">🔥</span> Scopri</a>
+            <a href="/spells" class="flex flex-col items-center justify-center text-red-pure gap-0.5"><span class="text-xl">✨</span> Magie</a>
+            <a href="/chats" class="flex flex-col items-center justify-center text-gray-500 gap-0.5"><span class="text-xl">💬</span> Chat</a>
+            <a href="/matches" class="flex flex-col items-center justify-center text-gray-500 gap-0.5"><span class="text-xl">♥</span> Match</a>
+            <a href="/profile" class="flex flex-col items-center justify-center text-gray-500 gap-0.5"><span class="text-xl">👤</span> Tu</a>
+        </div>
+    </nav>
+</body>
+</html>

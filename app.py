@@ -1955,7 +1955,7 @@ def _send_sms_otp(phone_e164: str, code: str) -> tuple:
 
 
 def send_otp_email(to_email: str, code: str, phone: str = None) -> bool:
-    """Invia OTP via SMTP. Prova 465 SSL e, se fallisce, 587 STARTTLS."""
+    """Invia OTP via SMTP. Gestisce cert SSL non validi (hosting condivisi)."""
     import os, smtplib, ssl
     from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
@@ -1968,8 +1968,10 @@ def send_otp_email(to_email: str, code: str, phone: str = None) -> bool:
     except Exception:
         port = 465
     from_addr = (os.environ.get("SMTP_FROM") or user or "admin@mycheating.it").strip()
+    # hosting tipo coderick: certificato spesso non matcha l'hostname
+    verify_ssl = (os.environ.get("SMTP_SSL_VERIFY") or "0").strip().lower() in ("1", "true", "yes")
 
-    print(f"[SMTP] host={host!r} port={port} user={user!r} from={from_addr!r} to={to_email!r} pass_set={bool(password)}")
+    print(f"[SMTP] host={host!r} port={port} user={user!r} from={from_addr!r} to={to_email!r} pass_set={bool(password)} pass_len={len(password)} ssl_verify={verify_ssl}")
 
     if not (host and user and password and to_email):
         print(f"[EMAIL OTP TEST] missing config — code={code} to={to_email}")
@@ -1987,44 +1989,54 @@ def send_otp_email(to_email: str, code: str, phone: str = None) -> bool:
     msg.attach(MIMEText(body, "plain", "utf-8"))
     raw = msg.as_string()
 
-    ctx = ssl.create_default_context()
-    errors = []
+    ctx_secure = ssl.create_default_context()
+    ctx_insecure = ssl._create_unverified_context()
 
-    def try_ssl(p):
+    def try_ssl(p, ctx):
         with smtplib.SMTP_SSL(host, p, timeout=30, context=ctx) as s:
             s.login(user, password)
-            s.sendmail(from_addr, [to_email], raw)
+            refused = s.sendmail(from_addr, [to_email], raw)
+            if refused:
+                raise RuntimeError(f"sendmail refused: {refused}")
 
-    def try_starttls(p):
+    def try_starttls(p, ctx):
         with smtplib.SMTP(host, p, timeout=30) as s:
             s.ehlo()
             s.starttls(context=ctx)
             s.ehlo()
             s.login(user, password)
-            s.sendmail(from_addr, [to_email], raw)
+            refused = s.sendmail(from_addr, [to_email], raw)
+            if refused:
+                raise RuntimeError(f"sendmail refused: {refused}")
 
-    # ordine: porta configurata, poi alternative
     attempts = []
-    if port == 465:
-        attempts = [(try_ssl, 465), (try_starttls, 587), (try_ssl, 465)]
-    elif port == 587:
-        attempts = [(try_starttls, 587), (try_ssl, 465)]
-    else:
-        attempts = [(try_ssl, port), (try_starttls, port), (try_ssl, 465), (try_starttls, 587)]
+    # prima con verify se richiesto, poi sempre senza verify (necessario per molti hosting)
+    contexts = [ctx_secure] if verify_ssl else []
+    contexts.append(ctx_insecure)
 
+    for ctx in contexts:
+        tag = "verify" if ctx is ctx_secure else "no-verify"
+        if port == 587:
+            attempts.append((try_starttls, 587, ctx, tag))
+            attempts.append((try_ssl, 465, ctx, tag))
+        else:
+            attempts.append((try_ssl, 465 if port == 465 else port, ctx, tag))
+            attempts.append((try_starttls, 587, ctx, tag))
+
+    errors = []
     seen = set()
-    for fn, p in attempts:
-        key = (fn.__name__, p)
+    for fn, p, ctx, tag in attempts:
+        key = (fn.__name__, p, tag)
         if key in seen:
             continue
         seen.add(key)
         try:
-            print(f"[SMTP] trying {fn.__name__} port={p}…")
-            fn(p)
-            print(f"[EMAIL OTP OK] sent to {to_email} via {fn.__name__}:{p}")
+            print(f"[SMTP] trying {fn.__name__} port={p} ssl={tag}…")
+            fn(p, ctx)
+            print(f"[EMAIL OTP OK] sent to {to_email} via {fn.__name__}:{p} ({tag})")
             return True
         except Exception as e:
-            err = f"{fn.__name__}:{p} -> {type(e).__name__}: {e}"
+            err = f"{fn.__name__}:{p}:{tag} -> {type(e).__name__}: {e}"
             print("[SMTP] fail", err)
             errors.append(err)
 

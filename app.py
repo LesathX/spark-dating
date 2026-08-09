@@ -2428,10 +2428,70 @@ def _send_sms_otp(phone_e164: str, code: str) -> tuple:
 _last_smtp_error = None
 
 def send_otp_email(to_email: str, code: str, phone: str = None) -> bool:
-    """Invia OTP via SMTP. Gestisce cert SSL non validi (hosting condivisi)."""
+    """Invia OTP: prima EmailJS (API), poi SMTP se configurato."""
     global _last_smtp_error
     _last_smtp_error = None
-    import os, smtplib, ssl
+    import os, json
+    from urllib.request import Request, urlopen
+    from urllib.error import HTTPError, URLError
+
+    to_email = (to_email or "").strip()
+    if not to_email:
+        _last_smtp_error = "missing recipient"
+        return False
+
+    # ---------- EmailJS ----------
+    service_id = (os.environ.get("EMAILJS_SERVICE_ID") or "").strip()
+    template_id = (os.environ.get("EMAILJS_TEMPLATE_ID") or "").strip()
+    public_key = (os.environ.get("EMAILJS_PUBLIC_KEY") or "").strip()
+    private_key = (os.environ.get("EMAILJS_PRIVATE_KEY") or "").strip()
+
+    if service_id and template_id and public_key:
+        payload = {
+            "service_id": service_id,
+            "template_id": template_id,
+            "user_id": public_key,
+            "template_params": {
+                "code": str(code),
+                "to_email": to_email,
+                "email": to_email,
+                "phone": phone or "",
+                "message": f"Codice verifica MyCheating: {code}",
+            },
+        }
+        if private_key:
+            payload["accessToken"] = private_key
+        body = json.dumps(payload).encode("utf-8")
+        req = Request(
+            "https://api.emailjs.com/api/v1.0/email/send",
+            data=body,
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Origin": "https://spark-dating-ng10.onrender.com",
+            },
+        )
+        try:
+            with urlopen(req, timeout=25) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+                print(f"[EmailJS OK] status={resp.status} to={to_email} body={raw[:120]}")
+                _last_smtp_error = None
+                return True
+        except HTTPError as e:
+            err_body = e.read().decode("utf-8", errors="replace") if e.fp else ""
+            _last_smtp_error = f"EmailJS HTTP {e.code}: {err_body[:300]}"
+            print("[EmailJS fail]", _last_smtp_error)
+        except URLError as e:
+            _last_smtp_error = f"EmailJS URLError: {e}"
+            print("[EmailJS fail]", _last_smtp_error)
+        except Exception as e:
+            _last_smtp_error = f"EmailJS {type(e).__name__}: {e}"
+            print("[EmailJS fail]", _last_smtp_error)
+    else:
+        print("[EmailJS] non configurato (mancano SERVICE_ID/TEMPLATE_ID/PUBLIC_KEY)")
+
+    # ---------- SMTP fallback ----------
+    import smtplib, ssl
     from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
 
@@ -2443,82 +2503,41 @@ def send_otp_email(to_email: str, code: str, phone: str = None) -> bool:
     except Exception:
         port = 465
     from_addr = (os.environ.get("SMTP_FROM") or user or "admin@mycheating.it").strip()
-    verify_ssl = (os.environ.get("SMTP_SSL_VERIFY") or "0").strip().lower() in ("1", "true", "yes")
 
-    print(f"[SMTP] host={host!r} port={port} user={user!r} from={from_addr!r} to={to_email!r} pass_set={bool(password)} pass_len={len(password)} ssl_verify={verify_ssl}")
-
-    if not (host and user and password and to_email):
-        _last_smtp_error = "missing SMTP_HOST/USER/PASS or recipient"
-        print(f"[EMAIL OTP TEST] missing config — code={code} to={to_email}")
+    if not (host and user and password):
+        if not _last_smtp_error:
+            _last_smtp_error = "no EmailJS and no SMTP config"
+        print(f"[EMAIL OTP TEST] code={code} to={to_email}")
         return False
-
-    body = f"MyCheating – codice di verifica: {code}\nValido 10 minuti.\n"
-    if phone:
-        body += f"Numero collegato (visibile solo a te): {phone}\n"
-    body += "\nSe non hai richiesto questo codice, ignora pure questa email.\n"
 
     msg = MIMEMultipart()
     msg["Subject"] = "Codice verifica MyCheating"
     msg["From"] = from_addr
     msg["To"] = to_email
-    msg.attach(MIMEText(body, "plain", "utf-8"))
+    text = f"MyCheating – codice di verifica: {code}\nValido 10 minuti.\n"
+    if phone:
+        text += f"Numero: {phone}\n"
+    msg.attach(MIMEText(text, "plain", "utf-8"))
     raw = msg.as_string()
-
-    ctx_secure = ssl.create_default_context()
-    ctx_insecure = ssl._create_unverified_context()
-
-    def try_ssl(p, ctx):
-        with smtplib.SMTP_SSL(host, p, timeout=30, context=ctx) as s:
-            s.login(user, password)
-            refused = s.sendmail(from_addr, [to_email], raw)
-            if refused:
-                raise RuntimeError(f"sendmail refused: {refused}")
-
-    def try_starttls(p, ctx):
-        with smtplib.SMTP(host, p, timeout=30) as s:
-            s.ehlo()
-            s.starttls(context=ctx)
-            s.ehlo()
-            s.login(user, password)
-            refused = s.sendmail(from_addr, [to_email], raw)
-            if refused:
-                raise RuntimeError(f"sendmail refused: {refused}")
-
-    attempts = []
-    contexts = []
-    if verify_ssl:
-        contexts.append(ctx_secure)
-    contexts.append(ctx_insecure)
-
-    for ctx in contexts:
-        tag = "verify" if ctx is ctx_secure else "no-verify"
-        if port == 587:
-            attempts += [(try_starttls, 587, ctx, tag), (try_ssl, 465, ctx, tag)]
+    ctx = ssl._create_unverified_context()
+    try:
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port, timeout=20, context=ctx) as s:
+                s.login(user, password)
+                s.sendmail(from_addr, [to_email], raw)
         else:
-            attempts += [(try_ssl, 465 if port in (465, 0) else port, ctx, tag), (try_starttls, 587, ctx, tag)]
-
-    errors = []
-    seen = set()
-    for fn, p, ctx, tag in attempts:
-        key = (fn.__name__, p, tag)
-        if key in seen:
-            continue
-        seen.add(key)
-        try:
-            print(f"[SMTP] trying {fn.__name__} port={p} ssl={tag}…")
-            fn(p, ctx)
-            print(f"[EMAIL OTP OK] sent to {to_email} via {fn.__name__}:{p} ({tag})")
-            _last_smtp_error = None
-            return True
-        except Exception as e:
-            err = f"{fn.__name__}:{p}:{tag} -> {type(e).__name__}: {e}"
-            print("[SMTP] fail", err)
-            errors.append(err)
-
-    _last_smtp_error = " | ".join(errors) if errors else "unknown"
-    print("[SMTP] all attempts failed:", _last_smtp_error)
-    print(f"[EMAIL OTP TEST fallback] {to_email} code={code}")
-    return False
+            with smtplib.SMTP(host, port, timeout=20) as s:
+                s.ehlo(); s.starttls(context=ctx); s.ehlo()
+                s.login(user, password)
+                s.sendmail(from_addr, [to_email], raw)
+        print(f"[EMAIL OTP OK SMTP] to={to_email}")
+        _last_smtp_error = None
+        return True
+    except Exception as e:
+        _last_smtp_error = (str(_last_smtp_error) + " | " if _last_smtp_error else "") + f"SMTP: {e}"
+        print("[SMTP fail]", e)
+        print(f"[EMAIL OTP TEST fallback] {to_email} code={code}")
+        return False
 
 
 @app.get("/verify-phone", response_class=HTMLResponse)

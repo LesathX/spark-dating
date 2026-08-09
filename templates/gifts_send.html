@@ -23,6 +23,8 @@
     <div class="max-w-md mx-auto px-4 py-5">
         {% if request.query_params.get('err') == 'crediti' %}
         <div class="mb-4 bg-red-500/20 border border-red-500 text-red-300 text-center py-2 rounded-xl text-sm">Crediti insufficienti</div>
+        {% elif request.query_params.get('err') == 'db' %}
+        <div class="mb-4 bg-red-500/20 border border-red-500 text-red-300 text-center py-2 rounded-xl text-sm">Errore invio dono — esegui SQL tabelle doni su Supabase</div>
         {% elif request.query_params.get('err') == 'no_riceve' %}
         <div class="mb-4 bg-red-500/20 border border-red-500 text-red-300 text-center py-2 rounded-xl text-sm">Questo utente non può ricevere doni</div>
         {% endif %}

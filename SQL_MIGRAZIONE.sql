@@ -145,3 +145,32 @@ SELECT * FROM (VALUES
 WHERE NOT EXISTS (SELECT 1 FROM gift_types LIMIT 1);
 
 ALTER TABLE user_restrictions ADD COLUMN IF NOT EXISTS no_ricevere_doni INTEGER DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS gift_types (
+    id SERIAL PRIMARY KEY,
+    nome VARCHAR(50) NOT NULL,
+    emoji VARCHAR(10) NOT NULL,
+    costo INTEGER NOT NULL DEFAULT 10,
+    attivo INTEGER DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS gifts_sent (
+    id SERIAL PRIMARY KEY,
+    from_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    to_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    gift_type_id INTEGER NOT NULL REFERENCES gift_types(id),
+    conversation_id INTEGER,
+    messaggio TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+INSERT INTO gift_types (nome, emoji, costo)
+SELECT * FROM (VALUES
+    ('Rosa', '🌹', 5),
+    ('Cuore', '❤️', 10),
+    ('Cioccolatini', '🍫', 15),
+    ('Champagne', '🥂', 25),
+    ('Diamante', '💎', 50),
+    ('Fuochi', '🎆', 30),
+    ('Orsacchiotto', '🧸', 20),
+    ('Corona', '👑', 100)
+) AS v(nome, emoji, costo)
+WHERE NOT EXISTS (SELECT 1 FROM gift_types LIMIT 1);

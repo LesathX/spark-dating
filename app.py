@@ -2442,111 +2442,168 @@ async def gifts_send_page(req: Request, to_user_id: int):
     })
 
 
+
 @app.post("/gifts/send/{to_user_id}")
-async def gifts_send(req: Request, to_user_id: int, gift_type_id: int = Form(...),
-                     messaggio: str = Form(""), conversation_id: int = Form(None)):
+async def gifts_send(req: Request, to_user_id: int):
     user = current_user(req)
     if not user:
         return RedirectResponse("/login", 303)
-    if is_suspended(user) or to_user_id == user["id"]:
-        return RedirectResponse("/gifts", 303)
-    r = get_restrictions(user["id"])
-    if r.get("no_doni"):
-        return RedirectResponse("/gifts?err=restrizione", 303)
+    try:
+        if is_suspended(user) or to_user_id == user["id"]:
+            return RedirectResponse("/gifts", 303)
+        r = get_restrictions(user["id"])
+        if r.get("no_doni"):
+            return RedirectResponse("/gifts?err=restrizione", 303)
 
-    c = db()
-    cur = c.cursor()
-    cur.execute("SELECT * FROM gift_types WHERE id=%s AND attivo=1", (gift_type_id,))
-    gt = cur.fetchone()
-    if not gt:
+        form = await req.form()
+        try:
+            gift_type_id = int(form.get("gift_type_id") or 0)
+        except Exception:
+            return RedirectResponse(f"/gifts/send/{to_user_id}", 303)
+        messaggio = (form.get("messaggio") or "").strip()
+        conv_raw = form.get("conversation_id")
+        conversation_id = None
+        if conv_raw not in (None, "", "None"):
+            try:
+                conversation_id = int(conv_raw)
+            except Exception:
+                conversation_id = None
+
+        c = db()
+        cur = c.cursor()
+        try:
+            cur.execute("SELECT * FROM gift_types WHERE id=%s AND COALESCE(attivo,1)=1", (gift_type_id,))
+            gt = cur.fetchone()
+        except Exception as e:
+            cur.close()
+            c.close()
+            print("gift_types missing:", e)
+            return RedirectResponse("/gifts?err=no_table", 303)
+        if not gt:
+            cur.close()
+            c.close()
+            return RedirectResponse(f"/gifts/send/{to_user_id}", 303)
+        gt = dict(gt)
+        cost = int(gt.get("costo") or 10)
         cur.close()
         c.close()
-        return RedirectResponse(f"/gifts/send/{to_user_id}", 303)
-    gt = dict(gt)
-    cost = int(gt["costo"])
-    cur.close()
-    c.close()
 
-    # destinatario può ricevere?
-    r_to = get_restrictions(to_user_id)
-    if r_to.get("no_ricevere_doni"):
-        return RedirectResponse(f"/gifts/send/{to_user_id}?err=no_riceve", 303)
+        r_to = get_restrictions(to_user_id)
+        if r_to.get("no_ricevere_doni"):
+            return RedirectResponse(f"/gifts/send/{to_user_id}?err=no_riceve", 303)
 
-    if not spend_credits(user["id"], cost, f"dono_{gt['nome']}", to_user_id):
-        return RedirectResponse(f"/gifts/send/{to_user_id}?err=crediti", 303)
+        if not spend_credits(user["id"], cost, f"dono_{gt.get('nome','')}", to_user_id):
+            return RedirectResponse(f"/gifts/send/{to_user_id}?err=crediti", 303)
 
-    # 50% crediti al destinatario (arrotondamento per difetto)
-    reward = cost // 2
-    if reward > 0:
-        try:
-            c0 = db()
-            cur0 = c0.cursor()
-            cur0.execute("UPDATE users SET credits = credits + %s WHERE id=%s", (reward, to_user_id))
+        reward = cost // 2
+        if reward > 0:
             try:
+                c0 = db()
+                cur0 = c0.cursor()
                 cur0.execute(
-                    """INSERT INTO credit_transactions (user_id, amount, tipo, related_user_id, note)
-                       VALUES (%s, %s, 'dono_ricevuto', %s, %s)""",
-                    (to_user_id, reward, user["id"], f"50% da dono {gt['nome']}"),
+                    "UPDATE users SET credits = COALESCE(credits,0) + %s WHERE id=%s",
+                    (reward, to_user_id),
                 )
+                try:
+                    cur0.execute(
+                        "INSERT INTO credit_transactions (user_id, amount, motivo, related_id) VALUES (%s,%s,%s,%s)",
+                        (to_user_id, reward, "dono_ricevuto", user["id"]),
+                    )
+                except Exception:
+                    pass
+                c0.commit()
+                cur0.close()
+                c0.close()
+            except Exception as e:
+                print("gift reward error:", e)
+
+        c = db()
+        cur = c.cursor()
+        try:
+            conv_id = conversation_id
+            if not conv_id:
+                try:
+                    cur.execute("""
+                        SELECT c.id FROM conversations c
+                        JOIN matches m ON m.id = c.match_id
+                        WHERE (m.user1_id=%s AND m.user2_id=%s) OR (m.user1_id=%s AND m.user2_id=%s)
+                        LIMIT 1
+                    """, (user["id"], to_user_id, to_user_id, user["id"]))
+                    row = cur.fetchone()
+                    conv_id = row["id"] if row else None
+                except Exception:
+                    conv_id = None
+
+            gift_id = None
+            try:
+                cur.execute(
+                    """INSERT INTO gifts_sent (from_user_id, to_user_id, gift_type_id, conversation_id, messaggio)
+                       VALUES (%s,%s,%s,%s,%s) RETURNING id""",
+                    (user["id"], to_user_id, gift_type_id, conv_id, messaggio[:200] if messaggio else None),
+                )
+                gift_id = cur.fetchone()["id"]
+            except Exception as e:
+                print("gifts_sent insert:", e)
+                c.rollback()
+                # tabella mancante: non bloccare del tutto se crediti già scalati
+                return RedirectResponse("/gifts?err=no_table", 303)
+
+            if conv_id:
+                testo = f"🎁 Ti ha inviato: {gt.get('emoji','🎁')} {gt.get('nome','Dono')}"
+                if messaggio:
+                    testo += f" — «{messaggio[:80]}»"
+                try:
+                    cur.execute(
+                        "INSERT INTO messages (conversation_id, sender_id, tipo, contenuto) VALUES (%s,%s,%s,%s)",
+                        (conv_id, user["id"], "testo", testo),
+                    )
+                    cur.execute(
+                        "UPDATE conversations SET ultimo_messaggio_at=CURRENT_TIMESTAMP WHERE id=%s",
+                        (conv_id,),
+                    )
+                except Exception as e:
+                    print("gift message insert:", e)
+
+            try:
+                cur.execute(
+                    """INSERT INTO notifications (user_id, tipo, titolo, contenuto, related_id)
+                       VALUES (%s, %s, %s, %s, %s)""",
+                    (
+                        to_user_id,
+                        "dono",
+                        f"Hai ricevuto {gt.get('emoji','🎁')} {gt.get('nome','un dono')}",
+                        f"{user.get('nome', 'Qualcuno')} ti ha inviato un dono!",
+                        gift_id,
+                    ),
+                )
+            except Exception as e:
+                print("gift notif:", e)
+
+            c.commit()
+            try:
+                await manager.send(to_user_id, {
+                    "type": "dono",
+                    "title": f"Dono {gt.get('emoji','🎁')}",
+                    "message": f"{user.get('nome', 'Qualcuno')} ti ha inviato {gt.get('nome','un dono')}",
+                })
             except Exception:
                 pass
-            c0.commit()
-            cur0.close()
-            c0.close()
         except Exception as e:
-            print("gift reward error:", e)
+            c.rollback()
+            print("gift send error:", e)
+            return RedirectResponse(f"/gifts/send/{to_user_id}?err=db", 303)
+        finally:
+            try:
+                cur.close()
+                c.close()
+            except Exception:
+                pass
 
-    c = db()
-    cur = c.cursor()
-    try:
-        conv_id = conversation_id
-        if not conv_id:
-            cur.execute("""
-                SELECT c.id FROM conversations c
-                JOIN matches m ON m.id = c.match_id
-                WHERE (m.user1_id=%s AND m.user2_id=%s) OR (m.user1_id=%s AND m.user2_id=%s)
-                LIMIT 1
-            """, (user["id"], to_user_id, to_user_id, user["id"]))
-            row = cur.fetchone()
-            conv_id = row["id"] if row else None
-
-        cur.execute(
-            """INSERT INTO gifts_sent (from_user_id, to_user_id, gift_type_id, conversation_id, messaggio)
-               VALUES (%s,%s,%s,%s,%s) RETURNING id""",
-            (user["id"], to_user_id, gift_type_id, conv_id, (messaggio or "")[:200] or None),
-        )
-        gift_id = cur.fetchone()["id"]
-
-        if conv_id:
-            testo = f"🎁 Ti ha inviato: {gt['emoji']} {gt['nome']}"
-            if messaggio:
-                testo += f" — «{messaggio[:80]}»"
-            cur.execute(
-                "INSERT INTO messages (conversation_id, sender_id, tipo, contenuto) VALUES (%s,%s,'dono',%s)",
-                (conv_id, user["id"], testo),
-            )
-            cur.execute("UPDATE conversations SET ultimo_messaggio_at=CURRENT_TIMESTAMP WHERE id=%s", (conv_id,))
-
-        cur.execute(
-            """INSERT INTO notifications (user_id, tipo, titolo, contenuto, related_id)
-               VALUES (%s, 'dono', %s, %s, %s)""",
-            (to_user_id, f"Hai ricevuto {gt['emoji']} {gt['nome']}", 
-             f"{user.get('nome', 'Qualcuno')} ti ha inviato un dono!", gift_id),
-        )
-        c.commit()
-        await manager.send(to_user_id, {
-            "type": "dono",
-            "title": f"Dono {gt['emoji']}",
-            "message": f"{user.get('nome', 'Qualcuno')} ti ha inviato {gt['nome']}",
-        })
+        if conversation_id:
+            return RedirectResponse(f"/chat/{conversation_id}", 303)
+        return RedirectResponse("/gifts?ok=1", 303)
     except Exception as e:
-        c.rollback()
-        print("gift send error:", e)
-    finally:
-        cur.close()
-        c.close()
+        print("gifts_send outer:", type(e).__name__, e)
+        return RedirectResponse(f"/gifts/send/{to_user_id}?err=db", 303)
 
-    if conversation_id:
-        return RedirectResponse(f"/chat/{conversation_id}", 303)
-    return RedirectResponse(f"/gifts?ok=1", 303)
 

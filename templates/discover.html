@@ -88,7 +88,7 @@
 
             <!-- Action buttons -->
             <div class="px-5 pb-2">
-                <input form="form-like" type="text" name="messaggio" maxlength="200" placeholder="Scrivi un messaggio col like (10 crediti)..."
+                <input form="form-like" type="text" name="messaggio" maxlength="200" placeholder="Messaggio col like (10 cr.) · o tocca 🎁 per un dono..."
                        class="w-full bg-black/50 border border-[#ff0000]/30 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-500">
             </div>
             <div class="flex items-center justify-center gap-4 py-6 px-4">
@@ -107,6 +107,8 @@
                     <input type="hidden" name="tipo" value="like">
                     <button class="w-16 h-16 rounded-full bg-[#22c55e] text-white text-3xl shadow-lg shadow-green-900/50 hover:scale-105 transition" title="Like">♥</button>
                 </form>
+                <a href="/gifts/send/{{ candidate.id }}"
+                   class="w-12 h-12 rounded-full bg-[#ff0000]/20 border border-[#ff0000]/40 text-xl flex items-center justify-center hover:bg-[#ff0000] transition" title="Invia dono">🎁</a>
                 <form method="post" action="/block/{{ candidate.id }}">
                     <button class="w-12 h-12 rounded-full bg-white/5 border border-white/15 text-sm text-gray-400 hover:text-red-pure hover:border-red-pure transition" title="Blocca">🚫</button>
                 </form>

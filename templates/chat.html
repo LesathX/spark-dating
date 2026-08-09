@@ -33,7 +33,7 @@
             <p class="mb-2">📷 <strong>{{ altro.nome }}</strong> ha chiesto di vedere la gallery private
             (ha già pagato {{ pending_request.credits_paid }} crediti, <span class="text-red-pure">non rimborsabili</span>).</p>
             <div class="flex gap-2">
-                <form method="post" action="/gallery/decide/{{ pending_request.id }}" class="flex-1">
+            <form method="post" action="/gallery/decide/{{ pending_request.id }}" class="flex-1">
                     <input type="hidden" name="conversation_id" value="{{ conversation_id }}">
                     <input type="hidden" name="decision" value="approved">
                     <button class="w-full py-2 rounded-lg bg-green-600 text-white text-sm font-semibold">Accetta</button>
@@ -95,7 +95,10 @@
         {% endfor %}
     </div>
 
-    <form method="post" action="/chat/{{ conversation_id }}/send" class="p-4 border-t border-white/10 flex gap-2">
+    <div class="px-4 pt-2 border-t border-white/10 flex gap-2">
+        <a href="/gifts/send/{{ altro.id }}" class="shrink-0 self-center bg-[#ff0000]/20 border border-[#ff0000]/40 text-[#ff0000] text-xs px-3 py-2 rounded-xl font-semibold">🎁 Dono</a>
+    </div>
+    <form method="post" action="/chat/{{ conversation_id }}/send" class="px-4 pb-4 pt-2 flex gap-2">
         <input type="text" name="contenuto" required placeholder="Scrivi un messaggio..."
                class="flex-1 bg-white/5 border border-white/15 text-white placeholder-gray-500 rounded-full px-5 py-3 text-sm outline-none focus:border-[#ff0000]"
                autocomplete="off">

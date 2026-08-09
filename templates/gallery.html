@@ -27,7 +27,7 @@
         <div class="mb-4 bg-red-500/20 border border-red-500 text-red-300 text-sm text-center py-2 rounded-xl">Errore salvataggio</div>
         {% endif %}
 
-        <form method="post" action="/photos/upload" enctype="multipart/form-data"
+        <form method="post" action="/gallery/upload" enctype="multipart/form-data"
               class="bg-white/5 border border-white/10 rounded-2xl p-4 mb-6 space-y-3">
             <h2 class="font-hot text-lg">CARICA FOTO O VIDEO</h2>
             <p class="text-xs text-gray-500">Dal telefono o dal PC · max 500 MB</p>
@@ -50,7 +50,7 @@
                 {% else %}
                 <img src="{{ p.url }}" class="w-full h-full object-cover" alt="">
                 {% endif %}
-                <form method="post" action="/photos/delete/{{ p.id }}" class="absolute top-2 right-2">
+                <form method="post" action="/gallery/delete/{{ p.id }}" class="absolute top-2 right-2">
                     <button class="bg-black/70 text-white text-xs px-2 py-1 rounded">✕</button>
                 </form>
             </div>
@@ -69,7 +69,7 @@
                 <img src="{{ p.url }}" class="w-full h-full object-cover" alt="">
                 {% endif %}
                 <div class="absolute bottom-0 left-0 right-0 bg-black/70 text-[10px] text-center py-1 text-red-pure">PRIVATO</div>
-                <form method="post" action="/photos/delete/{{ p.id }}" class="absolute top-2 right-2">
+                <form method="post" action="/gallery/delete/{{ p.id }}" class="absolute top-2 right-2">
                     <button class="bg-black/70 text-white text-xs px-2 py-1 rounded">✕</button>
                 </form>
             </div>

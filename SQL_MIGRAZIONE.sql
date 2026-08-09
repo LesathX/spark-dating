@@ -60,3 +60,6 @@ CREATE TABLE IF NOT EXISTS photo_access_requests (
     decided_at TIMESTAMP,
     UNIQUE(from_user_id, to_user_id)
 );
+
+ALTER TABLE user_photos ADD COLUMN IF NOT EXISTS media_type VARCHAR(20) DEFAULT 'image';
+ALTER TABLE user_photos ADD COLUMN IF NOT EXISTS media_type VARCHAR(20) DEFAULT 'image';

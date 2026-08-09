@@ -138,7 +138,8 @@ def haversine_km(lat1, lon1, lat2, lon2):
 
 
 # ============== INCANTESIMI (costi in crediti) ==============
-PHOTO_ACCESS_COST = 25  # crediti non rimborsabili per richiedere foto private
+PHOTO_ACCESS_COST = 25
+MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500 MB
 
 SPELLS = {
     "superlike": {"cost": 5, "label": "Super Like"},
@@ -1119,7 +1120,15 @@ async def admin_remove_admin(req: Request, user_id: int):
 
 # ============== FOTO PROFILO ==============
 
-@app.get("/photos", response_class=HTMLResponse)
+@app.get("/gallery", response_class=HTMLResponse)
+async def gallery_page_alias(req: Request):
+    return await photos_page(req)
+
+@app.get("/photos")
+async def photos_redirect():
+    return RedirectResponse("/gallery", 303)
+
+@app.get("/gallery", response_class=HTMLResponse)
 async def photos_page(req: Request):
     user = current_user(req)
     if not user:
@@ -1133,13 +1142,13 @@ async def photos_page(req: Request):
         photos = []
     cur.close()
     c.close()
-    return templates.TemplateResponse("photos.html", {
+    return templates.TemplateResponse("gallery.html", {
         "request": req, "user": user, "photos": photos, "unread": unread_count(user["id"]),
         "err": req.query_params.get("err"),
     })
 
 
-@app.post("/photos/upload")
+@app.post("/gallery/upload")
 async def photos_upload(
     req: Request,
     file: UploadFile = File(...),
@@ -1150,37 +1159,81 @@ async def photos_upload(
         return RedirectResponse("/login", 303)
 
     content_type = (file.content_type or "").lower()
-    if not content_type.startswith("image/"):
-        return RedirectResponse("/photos?err=tipo", 303)
-
-    data = await file.read()
-    if len(data) > 8 * 1024 * 1024:  # max 8MB
-        return RedirectResponse("/photos?err=grande", 303)
+    is_image = content_type.startswith("image/")
+    is_video = content_type.startswith("video/")
+    if not is_image and not is_video:
+        return RedirectResponse("/gallery?err=tipo", 303)
 
     import uuid
-    ext = "jpg"
-    if "png" in content_type:
-        ext = "png"
-    elif "webp" in content_type:
-        ext = "webp"
-    elif "gif" in content_type:
-        ext = "gif"
+    media_type = "video" if is_video else "image"
+    ext = "mp4"
+    if is_image:
+        ext = "jpg"
+        if "png" in content_type:
+            ext = "png"
+        elif "webp" in content_type:
+            ext = "webp"
+        elif "gif" in content_type:
+            ext = "gif"
+    else:
+        if "webm" in content_type:
+            ext = "webm"
+        elif "quicktime" in content_type or "mov" in content_type:
+            ext = "mov"
+        elif "3gpp" in content_type:
+            ext = "3gp"
+        else:
+            name = (file.filename or "").lower()
+            for e in ("mp4", "webm", "mov", "m4v", "avi"):
+                if name.endswith("." + e):
+                    ext = e
+                    break
+            else:
+                ext = "mp4"
 
     user_dir = BASE_DIR / "static" / "uploads" / str(user["id"])
     user_dir.mkdir(parents=True, exist_ok=True)
     fname = f"{uuid.uuid4().hex}.{ext}"
     fpath = user_dir / fname
-    fpath.write_bytes(data)
+
+    size = 0
+    try:
+        with open(fpath, "wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)  # 1MB chunks
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    out.close()
+                    fpath.unlink(missing_ok=True)
+                    return RedirectResponse("/gallery?err=grande", 303)
+                out.write(chunk)
+    except Exception as e:
+        print("upload stream error:", e)
+        try:
+            fpath.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return RedirectResponse("/gallery?err=db", 303)
+
     url = f"/static/uploads/{user['id']}/{fname}"
 
     c = db()
     cur = c.cursor()
     try:
-        cur.execute(
-            "INSERT INTO user_photos (user_id, url, is_private) VALUES (%s, %s, %s)",
-            (user["id"], url, 1 if int(is_private) else 0),
-        )
-        if not int(is_private):
+        try:
+            cur.execute(
+                "INSERT INTO user_photos (user_id, url, is_private, media_type) VALUES (%s, %s, %s, %s)",
+                (user["id"], url, 1 if int(is_private) else 0, media_type),
+            )
+        except Exception:
+            c.rollback()
+            cur.execute(
+                "INSERT INTO user_photos (user_id, url, is_private) VALUES (%s, %s, %s)",
+                (user["id"], url, 1 if int(is_private) else 0),
+            )
+        if not int(is_private) and media_type == "image":
             cur.execute(
                 "UPDATE users SET foto_principale_url=%s WHERE id=%s AND (foto_principale_url IS NULL OR foto_principale_url='')",
                 (url, user["id"]),
@@ -1189,14 +1242,15 @@ async def photos_upload(
     except Exception as e:
         c.rollback()
         print("photos_upload:", e)
-        return RedirectResponse("/photos?err=db", 303)
+        return RedirectResponse("/gallery?err=db", 303)
     finally:
         cur.close()
         c.close()
-    return RedirectResponse("/photos", 303)
+    return RedirectResponse("/gallery", 303)
 
 
-@app.post("/photos/delete/{photo_id}")
+
+@app.post("/gallery/delete/{photo_id}")
 async def photos_delete(req: Request, photo_id: int):
     user = current_user(req)
     if not user:
@@ -1218,7 +1272,7 @@ async def photos_delete(req: Request, photo_id: int):
         c.commit()
     cur.close()
     c.close()
-    return RedirectResponse("/photos", 303)
+    return RedirectResponse("/gallery", 303)
 
 
 def has_photo_access(viewer_id, owner_id):
@@ -1241,7 +1295,7 @@ def has_photo_access(viewer_id, owner_id):
         return False
 
 
-@app.post("/photos/request-access/{to_user_id}")
+@app.post("/gallery/request-access/{to_user_id}")
 async def photos_request_access(req: Request, to_user_id: int, conversation_id: int = Form(...)):
     """Richiede accesso alle foto private. Crediti scalati subito e NON rimborsabili."""
     user = current_user(req)
@@ -1327,7 +1381,7 @@ async def photos_request_access(req: Request, to_user_id: int, conversation_id: 
     return RedirectResponse(f"/chat/{conversation_id}?photo=sent", 303)
 
 
-@app.post("/photos/decide/{request_id}")
+@app.post("/gallery/decide/{request_id}")
 async def photos_decide(req: Request, request_id: int, decision: str = Form(...), conversation_id: int = Form(...)):
     """Approva o rifiuta. I crediti NON vengono rimborsati."""
     user = current_user(req)
@@ -1380,7 +1434,7 @@ async def photos_decide(req: Request, request_id: int, decision: str = Form(...)
     return RedirectResponse(f"/chat/{conversation_id}", 303)
 
 
-@app.get("/photos/view/{owner_id}", response_class=HTMLResponse)
+@app.get("/gallery/view/{owner_id}", response_class=HTMLResponse)
 async def photos_view(req: Request, owner_id: int):
     """Vede le foto di un utente: pubbliche sempre; private solo con consenso."""
     user = current_user(req)
@@ -1410,7 +1464,7 @@ async def photos_view(req: Request, owner_id: int):
         private = [dict(p) for p in cur.fetchall()]
     cur.close()
     c.close()
-    return templates.TemplateResponse("photos_view.html", {
+    return templates.TemplateResponse("gallery_view.html", {
         "request": req, "user": user, "owner": owner,
         "public": public, "private": private, "can_private": can_private,
         "unread": unread_count(user["id"]),

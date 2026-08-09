@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gallery di {{ owner.nome }} – MyCheating</title>
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: #0a0a0a; font-family: 'Oswald', sans-serif; }
+        .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
+        .text-red-pure { color: #ff0000; }
+    </style>
+</head>
+<body class="text-white min-h-screen pb-10">
+    <div class="sticky top-0 z-20 bg-[#0a0a0a]/95 border-b border-white/10 px-4 py-3 flex items-center gap-3">
+        <a href="javascript:history.back()" class="text-gray-400 text-xl">←</a>
+        <div class="font-hot text-xl tracking-wider">Gallery di {{ owner.nome }}</div>
+    </div>
+    <div class="max-w-md mx-auto px-4 py-6">
+        <h2 class="font-hot text-lg mb-3">Pubblici</h2>
+        <div class="grid grid-cols-2 gap-3 mb-8">
+            {% for p in public %}
+            <div class="aspect-square rounded-xl overflow-hidden border border-white/10 bg-black">
+                {% if p.media_type == 'video' or '.mp4' in p.url or '.webm' in p.url or '.mov' in p.url %}
+                <video src="{{ p.url }}" class="w-full h-full object-cover" controls playsinline></video>
+                {% else %}
+                <a href="{{ p.url }}" target="_blank"><img src="{{ p.url }}" class="w-full h-full object-cover" alt=""></a>
+                {% endif %}
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-sm col-span-2">Nessun contenuto pubblico</p>
+            {% endfor %}
+        </div>
+        <h2 class="font-hot text-lg mb-3">Privati 🔒</h2>
+        {% if can_private %}
+        <div class="grid grid-cols-2 gap-3">
+            {% for p in private %}
+            <div class="aspect-square rounded-xl overflow-hidden border border-[#ff0000]/40 bg-black">
+                {% if p.media_type == 'video' or '.mp4' in p.url or '.webm' in p.url or '.mov' in p.url %}
+                <video src="{{ p.url }}" class="w-full h-full object-cover" controls playsinline></video>
+                {% else %}
+                <a href="{{ p.url }}" target="_blank"><img src="{{ p.url }}" class="w-full h-full object-cover" alt=""></a>
+                {% endif %}
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-sm col-span-2">Nessun contenuto privato</p>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="bg-white/5 border border-white/10 rounded-xl p-4 text-sm text-gray-400 text-center">
+            Non hai il consenso per vedere le contenuti privati.<br>
+            Richiedilo in chat (a pagamento, crediti non rimborsabili).
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>

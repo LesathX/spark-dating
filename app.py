@@ -713,63 +713,148 @@ async def matches_page(req: Request):
         "request": req, "user": user, "matches": match_list, "new_match": new_match, "unread": unread_count(user["id"])
     })
 
+
+@app.get("/chat/with/{other_id}")
+async def chat_with_user(req: Request, other_id: int):
+    """Apre (o crea) la chat con un match."""
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    if other_id == user["id"]:
+        return RedirectResponse("/matches", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        u1, u2 = sorted([user["id"], other_id])
+        cur.execute(
+            "SELECT id FROM matches WHERE user1_id=%s AND user2_id=%s AND COALESCE(attivo,1)=1",
+            (u1, u2),
+        )
+        m = cur.fetchone()
+        if not m:
+            cur.close()
+            c.close()
+            return RedirectResponse("/matches", 303)
+        mid = m["id"]
+        cur.execute("SELECT id FROM conversations WHERE match_id=%s", (mid,))
+        conv = cur.fetchone()
+        if not conv:
+            cur.execute("INSERT INTO conversations (match_id) VALUES (%s) RETURNING id", (mid,))
+            conv = cur.fetchone()
+            c.commit()
+        conv_id = conv["id"]
+        cur.close()
+        c.close()
+        return RedirectResponse(f"/chat/{conv_id}", 303)
+    except Exception as e:
+        try:
+            c.rollback()
+            cur.close()
+            c.close()
+        except Exception:
+            pass
+        print("chat_with error:", e)
+        return RedirectResponse("/matches", 303)
+
 @app.get("/chat/{conversation_id}", response_class=HTMLResponse)
 async def chat_page(req: Request, conversation_id: int):
     user = current_user(req)
     if not user:
         return RedirectResponse("/login", 303)
-    c = db()
-    cur = c.cursor()
-    cur.execute("""SELECT c.id, m.user1_id, m.user2_id FROM conversations c
-           JOIN matches m ON m.id = c.match_id WHERE c.id=%s""", (conversation_id,))
-    conv = cur.fetchone()
-    if not conv or user["id"] not in (conv["user1_id"], conv["user2_id"]):
+    try:
+        c = db()
+        cur = c.cursor()
+        cur.execute("""SELECT c.id, m.user1_id, m.user2_id FROM conversations c
+               JOIN matches m ON m.id = c.match_id WHERE c.id=%s""", (conversation_id,))
+        conv = cur.fetchone()
+        if not conv or user["id"] not in (conv["user1_id"], conv["user2_id"]):
+            cur.close()
+            c.close()
+            return RedirectResponse("/chats", 303)
+        altro_id = conv["user2_id"] if user["id"] == conv["user1_id"] else conv["user1_id"]
+        cur.execute("SELECT * FROM users WHERE id=%s", (altro_id,))
+        row_altro = cur.fetchone()
+        if not row_altro:
+            cur.close()
+            c.close()
+            return RedirectResponse("/chats", 303)
+        altro = dict(row_altro)
+        try:
+            altro["eta"] = eta(altro.get("data_nascita"))
+        except Exception:
+            altro["eta"] = None
+
+        messaggi = []
+        try:
+            cur.execute("""SELECT m.*, u.nome FROM messages m JOIN users u ON u.id=m.sender_id
+                   WHERE m.conversation_id=%s AND COALESCE(m.eliminato,0)=0 ORDER BY m.data_invio""", (conversation_id,))
+            messaggi = cur.fetchall()
+        except Exception as e:
+            print("chat messages query:", e)
+            try:
+                c.rollback()
+                cur.execute("""SELECT m.*, u.nome FROM messages m JOIN users u ON u.id=m.sender_id
+                       WHERE m.conversation_id=%s ORDER BY m.id""", (conversation_id,))
+                messaggi = cur.fetchall()
+            except Exception as e2:
+                print("chat messages fallback:", e2)
+                c.rollback()
+                messaggi = []
+
+        try:
+            cur.execute(
+                "UPDATE messages SET letto=1 WHERE conversation_id=%s AND sender_id!=%s AND COALESCE(letto,0)=0",
+                (conversation_id, user["id"]),
+            )
+            c.commit()
+        except Exception as e:
+            c.rollback()
+            print("chat mark read:", e)
+
         cur.close()
         c.close()
-        return RedirectResponse("/chats", 303)
-    altro_id = conv["user2_id"] if user["id"] == conv["user1_id"] else conv["user1_id"]
-    cur.execute("SELECT * FROM users WHERE id=%s", (altro_id,))
-    altro = dict(cur.fetchone())
-    altro["eta"] = eta(altro["data_nascita"])
-    cur.execute("""SELECT m.*, u.nome FROM messages m JOIN users u ON u.id=m.sender_id
-           WHERE m.conversation_id=%s AND m.eliminato=0 ORDER BY m.data_invio""", (conversation_id,))
-    messaggi = cur.fetchall()
-    cur.execute("UPDATE messages SET letto=1 WHERE conversation_id=%s AND sender_id!=%s AND letto=0", (conversation_id, user["id"]))
-    c.commit()
-    cur.close()
-    c.close()
-    # stato accesso foto private
-    photo_access = None  # none | pending_out | pending_in | approved
-    pending_request = None
-    try:
-        c2 = db()
-        cur2 = c2.cursor()
-        cur2.execute(
-            "SELECT * FROM photo_access_requests WHERE from_user_id=%s AND to_user_id=%s",
-            (user["id"], altro["id"]),
-        )
-        out_req = cur2.fetchone()
-        cur2.execute(
-            "SELECT * FROM photo_access_requests WHERE from_user_id=%s AND to_user_id=%s AND status='pending'",
-            (altro["id"], user["id"]),
-        )
-        in_req = cur2.fetchone()
-        if out_req:
-            photo_access = out_req["status"]  # pending / approved / denied
-        if in_req:
-            pending_request = dict(in_req)
-        cur2.close()
-        c2.close()
-    except Exception as e:
-        print("chat photo state:", e)
 
-    return templates.TemplateResponse("chat.html", {
-        "request": req, "user": user, "altro": altro, "conversation_id": conversation_id,
-        "messaggi": [dict(m) for m in messaggi], "unread": unread_count(user["id"]),
-        "photo_access": photo_access,
-        "pending_request": pending_request,
-        "photo_cost": PHOTO_ACCESS_COST,
-    })
+        photo_access = None
+        pending_request = None
+        try:
+            c2 = db()
+            cur2 = c2.cursor()
+            cur2.execute(
+                "SELECT * FROM photo_access_requests WHERE from_user_id=%s AND to_user_id=%s",
+                (user["id"], altro["id"]),
+            )
+            out_req = cur2.fetchone()
+            cur2.execute(
+                "SELECT * FROM photo_access_requests WHERE from_user_id=%s AND to_user_id=%s AND status='pending'",
+                (altro["id"], user["id"]),
+            )
+            in_req = cur2.fetchone()
+            if out_req:
+                photo_access = out_req["status"]
+            if in_req:
+                pending_request = dict(in_req)
+            cur2.close()
+            c2.close()
+        except Exception as e:
+            print("chat photo state:", e)
+
+        msgs = []
+        for m in messaggi:
+            try:
+                msgs.append(dict(m))
+            except Exception:
+                pass
+
+        return templates.TemplateResponse("chat.html", {
+            "request": req, "user": user, "altro": altro, "conversation_id": conversation_id,
+            "messaggi": msgs, "unread": unread_count(user["id"]),
+            "photo_access": photo_access,
+            "pending_request": pending_request,
+            "photo_cost": PHOTO_ACCESS_COST if "PHOTO_ACCESS_COST" in dir() else 25,
+        })
+    except Exception as e:
+        print("chat_page error:", type(e).__name__, e)
+        return RedirectResponse("/chats?err=chat", 303)
 
 @app.post("/chat/{conversation_id}/send")
 async def send_message(req: Request, conversation_id: int, contenuto: str = Form(...)):
@@ -1094,6 +1179,85 @@ async def admin_panel(req: Request):
         """)
         online_users = [dict(r) for r in cur.fetchall()]
 
+    gallery_items = []
+    gift_types = []
+    gifts_recent = []
+    blocks = []
+
+    if tab == "foto":
+        try:
+            cur.execute("""
+                SELECT p.*, u.nome as nome_user
+                FROM user_photos p
+                LEFT JOIN users u ON u.id = p.user_id
+                ORDER BY p.id DESC LIMIT 100
+            """)
+            gallery_items = [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            print("admin foto:", e)
+
+    if tab == "doni":
+        try:
+            cur.execute("SELECT * FROM gift_types ORDER BY costo ASC")
+            gift_types = [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            print("admin gift_types:", e)
+        try:
+            cur.execute("""
+                SELECT g.*, gt.nome, gt.emoji, uf.nome as from_nome, ut.nome as to_nome
+                FROM gifts_sent g
+                JOIN gift_types gt ON gt.id = g.gift_type_id
+                JOIN users uf ON uf.id = g.from_user_id
+                JOIN users ut ON ut.id = g.to_user_id
+                ORDER BY g.created_at DESC LIMIT 50
+            """)
+            gifts_recent = [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            print("admin gifts_sent:", e)
+
+    if tab == "blocchi":
+        try:
+            cur.execute("""
+                SELECT b.*, u1.nome as blocker_nome, u2.nome as blocked_nome
+                FROM blocks b
+                JOIN users u1 ON u1.id = b.blocker_id
+                JOIN users u2 ON u2.id = b.blocked_id
+                ORDER BY b.id DESC LIMIT 100
+            """)
+            blocks = [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            print("admin blocks:", e)
+            try:
+                cur.execute("""
+                    SELECT b.*, u1.nome as blocker_nome, u2.nome as blocked_nome
+                    FROM blocks b
+                    JOIN users u1 ON u1.id = b.blocker_id
+                    JOIN users u2 ON u2.id = b.blocked_id
+                    ORDER BY b.created_at DESC NULLS LAST LIMIT 100
+                """)
+                blocks = [dict(r) for r in cur.fetchall()]
+            except Exception as e2:
+                print("admin blocks2:", e2)
+
+    if tab == "ricerca" and q:
+        like = f"%{q}%"
+        try:
+            cur.execute("""
+                SELECT id, nome, username, email, stato, is_admin, is_mod, credits, citta, data_nascita, ruolo, sospeso_fino
+                FROM users
+                WHERE nome ILIKE %s OR email ILIKE %s OR username ILIKE %s OR citta ILIKE %s
+                ORDER BY id DESC LIMIT 50
+            """, (like, like, like, like))
+            users = [dict(u) for u in cur.fetchall()]
+            for u in users:
+                u["restrictions"] = get_restrictions(u["id"])
+                try:
+                    u["eta"] = eta(u.get("data_nascita"))
+                except Exception:
+                    u["eta"] = None
+        except Exception as e:
+            print("admin ricerca:", e)
+
     cur.close()
     c.close()
 
@@ -1102,7 +1266,7 @@ async def admin_panel(req: Request):
         "user": user,
         "tab": tab,
         "q": q,
-        "filter": filter_stato if "filter_stato" in dir() else "tutti",
+        "filter": locals().get("filter_stato", "tutti"),
         "stats": {
             "users": users_count,
             "matches": matches_count,
@@ -1119,6 +1283,10 @@ async def admin_panel(req: Request):
         "thread_messages": thread_messages if tab == "messages" else [],
         "recent_matches": recent_matches,
         "online_users": online_users,
+        "gallery_items": gallery_items,
+        "gift_types": gift_types,
+        "gifts_recent": gifts_recent,
+        "blocks": blocks,
     })
 
 

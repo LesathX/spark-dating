@@ -43,9 +43,13 @@
                     {% endif %}
                 </div>
                 <div class="p-3">
-                    <div class="font-hot text-lg truncate">{{ m.nome }}, {{ m.eta }}</div>
+                    <a href="{% if m.conversation_id %}/chat/{{ m.conversation_id }}{% else %}/chat/with/{{ m.altro_id }}{% endif %}" class="font-hot text-lg truncate block hover:text-[#ff0000]">{{ m.nome }}{% if m.eta %}, {{ m.eta }}{% endif %}</a>
                     <div class="flex gap-1 mt-2">
+                        {% if m.conversation_id %}
                         <a href="/chat/{{ m.conversation_id }}" class="flex-1 text-center py-2 rounded-lg bg-[#ff0000] text-white text-sm font-semibold">💬</a>
+                        {% else %}
+                        <a href="/chat/with/{{ m.altro_id }}" class="flex-1 text-center py-2 rounded-lg bg-[#ff0000] text-white text-sm font-semibold">💬</a>
+                        {% endif %}
                         <a href="/gifts/send/{{ m.altro_id }}" class="flex-1 text-center py-2 rounded-lg bg-white/10 text-sm">🎁</a>
                         <a href="/gallery/view/{{ m.altro_id }}" class="flex-1 text-center py-2 rounded-lg bg-white/10 text-sm">📷</a>
                     </div>

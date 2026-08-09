@@ -38,7 +38,7 @@
         {% if matches %}
         <div class="space-y-2">
             {% for m in matches %}
-            <a href="/chat/{{ m.conversation_id }}" class="flex items-center gap-3 p-3 rounded-2xl bg-white/5 border border-white/10 hover:border-[#ff0000]/50 transition group">
+            <a href="{% if m.conversation_id %}/chat/{{ m.conversation_id }}{% else %}/chat/with/{{ m.altro_id }}{% endif %}" class="flex items-center gap-3 p-3 rounded-2xl bg-white/5 border border-white/10 hover:border-[#ff0000]/50 transition group">
                 <div class="relative shrink-0">
                     <div class="w-14 h-14 rounded-full bg-gradient-to-br from-red-600 to-black flex items-center justify-center font-hot text-xl">
                         {{ m.nome[0] | upper }}

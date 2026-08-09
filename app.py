@@ -341,7 +341,7 @@ async def reg(req: Request, email: str = Form(...), password: str = Form(...), u
         cur.execute("INSERT INTO user_preferences (user_id) VALUES (%s)", (uid,))
         c.commit()
         req.session["user_id"] = uid
-        return RedirectResponse("/verify-phone", 303)
+        return RedirectResponse("/verify-email", 303)
     except psycopg2.IntegrityError:
         c.rollback()
         return templates.TemplateResponse("register.html", {"request": req, "error": "Email o username gia in uso"})
@@ -2020,6 +2020,161 @@ async def verify_phone_confirm(req: Request, phone: str = Form(...), otp: str = 
     return RedirectResponse("/profile?phone=verified", 303)
 
 
+
+@app.get("/verify-email", response_class=HTMLResponse)
+async def verify_email_page(req: Request):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    if user.get("email_verified"):
+        return RedirectResponse("/profile?email=ok", 303)
+    return templates.TemplateResponse("verify_email.html", {
+        "request": req, "user": user, "step": "send", "error": None, "ok": None, "test_otp": None,
+    })
+
+
+@app.post("/verify-email/send")
+async def verify_email_send(req: Request):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    import random, smtplib, os
+    from email.mime.text import MIMEText
+    code = f"{random.randint(0, 999999):06d}"
+    email = user.get("email")
+    if not email:
+        return templates.TemplateResponse("verify_email.html", {
+            "request": req, "user": user, "step": "send", "error": "Email account mancante", "ok": None, "test_otp": None,
+        })
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS email_otps (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                email VARCHAR(200) NOT NULL,
+                code VARCHAR(10) NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                used INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        c.commit()
+    except Exception:
+        try:
+            c.rollback()
+        except Exception:
+            pass
+    try:
+        cur.execute(
+            """SELECT COUNT(*) as n FROM email_otps WHERE user_id=%s AND created_at > NOW() - interval '1 hour'""",
+            (user["id"],),
+        )
+        if int(cur.fetchone()["n"] or 0) >= 8:
+            cur.close(); c.close()
+            return templates.TemplateResponse("verify_email.html", {
+                "request": req, "user": user, "step": "send", "error": "Troppi tentativi. Riprova più tardi.", "ok": None, "test_otp": None,
+            })
+    except Exception:
+        try:
+            c.rollback()
+        except Exception:
+            pass
+    try:
+        cur.execute(
+            """INSERT INTO email_otps (user_id, email, code, expires_at) VALUES (%s,%s,%s, NOW() + interval '15 minutes')""",
+            (user["id"], email, code),
+        )
+        c.commit()
+    except Exception as e:
+        print("email otp insert:", e)
+        try:
+            c.rollback()
+        except Exception:
+            pass
+    cur.close(); c.close()
+
+    # invio email se SMTP configurato
+    smtp_host = os.environ.get("SMTP_HOST", "").strip()
+    smtp_user = os.environ.get("SMTP_USER", "").strip()
+    smtp_pass = os.environ.get("SMTP_PASS", "").strip()
+    smtp_port = int(os.environ.get("SMTP_PORT", "587") or 587)
+    smtp_from = os.environ.get("SMTP_FROM", smtp_user or "noreply@mycheating.local")
+    sent = False
+    if smtp_host and smtp_user and smtp_pass:
+        try:
+            msg = MIMEText(f"Il tuo codice MyCheating è: {code}\nValido 15 minuti.")
+            msg["Subject"] = "Codice verifica MyCheating"
+            msg["From"] = smtp_from
+            msg["To"] = email
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as s:
+                s.starttls()
+                s.login(smtp_user, smtp_pass)
+                s.sendmail(smtp_from, [email], msg.as_string())
+            sent = True
+        except Exception as e:
+            print("smtp send:", e)
+    else:
+        print(f"[EMAIL OTP TEST] {email} -> {code}")
+
+    return templates.TemplateResponse("verify_email.html", {
+        "request": req, "user": user, "step": "otp", "error": None,
+        "ok": "Codice inviato alla tua email" if sent else None,
+        "test_otp": None if sent else code,
+        "email": email,
+    })
+
+
+@app.post("/verify-email/confirm")
+async def verify_email_confirm(req: Request, otp: str = Form(...)):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    code = "".join(ch for ch in otp if ch.isdigit())
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute(
+            """SELECT id FROM email_otps WHERE user_id=%s AND code=%s AND used=0 AND expires_at > NOW()
+               ORDER BY id DESC LIMIT 1""",
+            (user["id"], code),
+        )
+        row = cur.fetchone()
+        if not row:
+            cur.close(); c.close()
+            return templates.TemplateResponse("verify_email.html", {
+                "request": req, "user": user, "step": "otp", "error": "Codice errato o scaduto",
+                "ok": None, "test_otp": None, "email": user.get("email"),
+            })
+        cur.execute("UPDATE email_otps SET used=1 WHERE id=%s", (row["id"],))
+        try:
+            cur.execute("UPDATE users SET email_verified=1, email_verified_at=NOW() WHERE id=%s", (user["id"],))
+        except Exception:
+            c.rollback()
+            try:
+                cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified INTEGER DEFAULT 0")
+                cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMP")
+                c.commit()
+                cur.execute("UPDATE users SET email_verified=1, email_verified_at=NOW() WHERE id=%s", (user["id"],))
+            except Exception as e:
+                print("email verified col:", e)
+                c.rollback()
+        c.commit()
+    except Exception as e:
+        print("email confirm:", e)
+        try:
+            c.rollback()
+        except Exception:
+            pass
+        cur.close(); c.close()
+        return templates.TemplateResponse("verify_email.html", {
+            "request": req, "user": user, "step": "otp", "error": "Errore verifica", "ok": None, "test_otp": None,
+        })
+    cur.close(); c.close()
+    return RedirectResponse("/profile?email=verified", 303)
+
+
 @app.get("/verify-phone/skip")
 async def verify_phone_skip(req: Request):
     user = current_user(req)
@@ -2424,6 +2579,8 @@ async def admin_panel(req: Request):
         cur0.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS telefono VARCHAR(32)")
         cur0.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified INTEGER DEFAULT 0")
         cur0.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMP")
+        cur0.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified INTEGER DEFAULT 0")
+        cur0.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMP")
         c0.commit()
         cur0.close()
         c0.close()
@@ -2441,8 +2598,12 @@ async def admin_panel(req: Request):
     c = db()
     cur = c.cursor()
 
-    cur.execute("SELECT COUNT(*) as c FROM users")
-    users_count = cur.fetchone()["c"]
+    try:
+        cur.execute("SELECT COUNT(*) as c FROM users WHERE COALESCE(is_bot,0)=0")
+        users_count = cur.fetchone()["c"]
+    except Exception:
+        cur.execute("SELECT COUNT(*) as c FROM users")
+        users_count = cur.fetchone()["c"]
     cur.execute("SELECT COUNT(*) as c FROM matches WHERE attivo=1")
     matches_count = cur.fetchone()["c"]
     cur.execute("SELECT COUNT(*) as c FROM messages")
@@ -2473,13 +2634,14 @@ async def admin_panel(req: Request):
             cur.execute("""
                 SELECT id, nome, username, email, stato, is_admin, is_mod, credits, is_online, latitude, longitude, bio, citta, genere, orientamento, data_nascita, ruolo, sospeso_fino, note_admin, last_ip
                 FROM users
-                WHERE nome ILIKE %s OR email ILIKE %s OR username ILIKE %s
+                WHERE COALESCE(is_bot,0)=0
+                  AND (nome ILIKE %s OR email ILIKE %s OR username ILIKE %s)
                 ORDER BY id DESC LIMIT 100
             """, (like, like, like))
         else:
             cur.execute("""
                 SELECT id, nome, username, email, stato, is_admin, is_mod, credits, is_online, latitude, longitude, bio, citta, genere, orientamento, data_nascita, ruolo, sospeso_fino, note_admin, last_ip
-                FROM users ORDER BY id DESC LIMIT 100
+                FROM users WHERE COALESCE(is_bot,0)=0 ORDER BY id DESC LIMIT 100
             """)
         users = [dict(u) for u in cur.fetchall()]
         for u in users:
@@ -2937,34 +3099,59 @@ async def admin_panel(req: Request):
                 phones = []
 
     if tab == "bot":
-
         try:
             cur.execute("""
-                SELECT id, nome, username, email, stato, credits, bio, citta, genere,
-                       data_nascita, foto_principale_url, is_online, COALESCE(is_bot,1) as is_bot
-                FROM users
-                WHERE COALESCE(is_bot,0)=1
-                ORDER BY id DESC LIMIT 200
+                CREATE TABLE IF NOT EXISTS bots (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER UNIQUE,
+                    nome VARCHAR(100),
+                    username VARCHAR(80),
+                    email VARCHAR(200),
+                    genere VARCHAR(20),
+                    orientamento VARCHAR(30),
+                    data_nascita DATE,
+                    bio TEXT,
+                    citta VARCHAR(100),
+                    credits INTEGER DEFAULT 50,
+                    latitude DOUBLE PRECISION,
+                    longitude DOUBLE PRECISION,
+                    foto_url TEXT,
+                    attivo INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            c.commit()
+        except Exception:
+            try:
+                c.rollback()
+            except Exception:
+                pass
+        try:
+            cur.execute("""
+                SELECT b.id, b.user_id, b.nome, b.username, b.email, b.genere, b.orientamento,
+                       b.data_nascita, b.bio, b.citta, b.credits, b.latitude, b.longitude,
+                       b.attivo, b.foto_url,
+                       COALESCE(u.stato, CASE WHEN b.attivo=1 THEN 'attivo' ELSE 'disattivo' END) as stato
+                FROM bots b
+                LEFT JOIN users u ON u.id = b.user_id
+                ORDER BY b.id DESC LIMIT 100
             """)
             bots = [dict(r) for r in cur.fetchall()]
-            for b in bots:
-                try:
-                    b["eta"] = eta(b.get("data_nascita"))
-                except Exception:
-                    b["eta"] = None
         except Exception as e:
-            print("admin bots (is_bot col?):", e)
+            print("admin bots table:", e)
             try:
+                c.rollback()
                 cur.execute("""
-                    SELECT id, nome, username, email, stato, credits, bio, citta, genere, data_nascita, foto_principale_url
-                    FROM users
-                    WHERE email LIKE '%@bot.mycheating%' OR username LIKE 'bot_%'
-                    ORDER BY id DESC LIMIT 200
+                    SELECT id, id as user_id, nome, username, email, genere, orientamento,
+                           data_nascita, bio, citta, credits, latitude, longitude,
+                           1 as attivo, foto_principale_url as foto_url, stato
+                    FROM users WHERE COALESCE(is_bot,0)=1 ORDER BY id DESC LIMIT 100
                 """)
                 bots = [dict(r) for r in cur.fetchall()]
             except Exception as e2:
-                print("admin bots2:", e2)
+                print("admin bots fallback:", e2)
                 bots = []
+
 
     if tab == "ricerca" and q:
         like = f"%{q}%"
@@ -3460,7 +3647,7 @@ async def admin_report_unsuspend(req: Request, report_id: int):
 
 @app.post("/admin/bots/create")
 async def admin_bot_create(req: Request):
-    """Genera bot automatico: admin sceglie solo genere + orientamento (e opz. quanti)."""
+    """Crea bot nella tabella bots (+ account ombra is_bot=1 per match/swipe, separato dagli utenti reali)."""
     if not require_admin(req):
         return RedirectResponse("/login", 303)
     form = await req.form()
@@ -3470,21 +3657,18 @@ async def admin_bot_create(req: Request):
         quanti = int(form.get("quanti") or 1)
     except Exception:
         quanti = 1
-    quanti = max(1, min(quanti, 20))  # max 20 alla volta
+    quanti = max(1, min(quanti, 20))
 
     import random, uuid
-    from datetime import date, timedelta
+    from datetime import date
 
     NOMI_F = ["Giulia", "Sara", "Francesca", "Chiara", "Valentina", "Martina", "Elena", "Alice",
-              "Sofia", "Aurora", "Greta", "Noemi", "Irene", "Camilla", "Beatrice", "Ludovica",
-              "Federica", "Silvia", "Laura", "Paola", "Michela", "Elisa", "Giorgia", "Rebecca"]
+              "Sofia", "Aurora", "Greta", "Noemi", "Irene", "Camilla", "Beatrice", "Ludovica"]
     NOMI_M = ["Marco", "Luca", "Alessandro", "Andrea", "Matteo", "Davide", "Francesco", "Lorenzo",
-              "Simone", "Riccardo", "Gabriele", "Tommaso", "Nicola", "Stefano", "Paolo", "Antonio",
-              "Giovanni", "Fabio", "Daniele", "Emanuele", "Samuele", "Pietro", "Leonardo", "Diego"]
-    NOMI_A = NOMI_F + NOMI_M + ["Alex", "Sam", "Taylor", "Jordan", "Chris"]
+              "Simone", "Riccardo", "Gabriele", "Tommaso", "Nicola", "Stefano", "Paolo", "Antonio"]
+    NOMI_A = NOMI_F + NOMI_M + ["Alex", "Sam", "Taylor"]
     CITTA = ["Milano", "Roma", "Torino", "Napoli", "Bologna", "Firenze", "Palermo", "Genova",
-             "Verona", "Padova", "Bari", "Catania", "Venezia", "Trieste", "Brescia", "Parma",
-             "Modena", "Perugia", "Cagliari", "Bergamo"]
+             "Verona", "Padova", "Bari", "Catania", "Venezia", "Brescia", "Parma"]
     BIOS = [
         "Qui per conoscersi senza filtri 🔥",
         "Amo viaggiare e le serate in città",
@@ -3492,119 +3676,115 @@ async def admin_bot_create(req: Request):
         "Sport, musica e chiacchiere fino a tardi",
         "Nuovo/a in zona, apriamo una chat?",
         "Niente storie complicate, solo feeling",
-        "Aperitivo lover 🍷",
-        "Se fai ridere, hai già vinto",
     ]
-
-    if genere in ("donna", "f", "female", "ragazza"):
-        genere = "donna"
-        nomi = NOMI_F
-    elif genere in ("uomo", "m", "male", "ragazzo"):
-        genere = "uomo"
-        nomi = NOMI_M
-    else:
-        genere = "altro"
-        nomi = NOMI_A
-
-    # normalizza orientamento
-    ori_map = {
-        "etero": "etero", "heterosexual": "etero", "straight": "etero",
-        "omo": "omo", "gay": "omo", "lesbica": "omo", "lesbian": "omo",
-        "bi": "bi", "bisessuale": "bi", "bisexual": "bi",
-        "altro": "altro", "tutti": "tutti",
+    gps = {
+        "Milano": (45.46, 9.19), "Roma": (41.90, 12.50), "Torino": (45.07, 7.69),
+        "Napoli": (40.85, 14.27), "Bologna": (44.49, 11.34), "Firenze": (43.77, 11.25),
+        "Palermo": (38.12, 13.36), "Genova": (44.41, 8.93), "Verona": (45.44, 10.99),
+        "Padova": (45.41, 11.88), "Bari": (41.12, 16.87), "Catania": (37.51, 15.08),
+        "Venezia": (45.44, 12.32), "Brescia": (45.54, 10.21), "Parma": (44.80, 10.33),
     }
+
+    if genere in ("donna", "f", "female"):
+        genere, nomi = "donna", NOMI_F
+    elif genere in ("uomo", "m", "male"):
+        genere, nomi = "uomo", NOMI_M
+    else:
+        genere, nomi = "altro", NOMI_A
+    ori_map = {"etero": "etero", "omo": "omo", "gay": "omo", "bi": "bi", "tutti": "tutti"}
     orientamento = ori_map.get(orientamento, orientamento) or "etero"
 
-    created_ids = []
     c = db()
     cur = c.cursor()
+    # tabella bots dedicata
     try:
-        for _ in range(quanti):
-            nome = random.choice(nomi)
-            age = random.randint(21, 38)
-            # compleanno random coerente
-            today = date.today()
-            birth = date(today.year - age, random.randint(1, 12), random.randint(1, 28))
-            nick_base = (nome.lower()
-                         .replace("à", "a").replace("è", "e").replace("é", "e")
-                         .replace("ì", "i").replace("ò", "o").replace("ù", "u"))
-            username = f"{nick_base}{random.randint(10, 99)}{uuid.uuid4().hex[:4]}"
-            email = f"{username}@bot.mycheating.local"
-            citta = random.choice(CITTA)
-            bio = random.choice(BIOS)
-            credits = random.choice([30, 50, 80, 100])
-            password = "bot_" + uuid.uuid4().hex[:8]
-            pwd_hash = hash_pw(password)
-            # leggero offset GPS città italiane approssimative
-            gps = {
-                "Milano": (45.46, 9.19), "Roma": (41.90, 12.50), "Torino": (45.07, 7.69),
-                "Napoli": (40.85, 14.27), "Bologna": (44.49, 11.34), "Firenze": (43.77, 11.25),
-                "Palermo": (38.12, 13.36), "Genova": (44.41, 8.93), "Verona": (45.44, 10.99),
-                "Padova": (45.41, 11.88), "Bari": (41.12, 16.87), "Catania": (37.51, 15.08),
-                "Venezia": (45.44, 12.32), "Trieste": (45.65, 13.78), "Brescia": (45.54, 10.21),
-                "Parma": (44.80, 10.33), "Modena": (44.65, 10.93), "Perugia": (43.11, 12.39),
-                "Cagliari": (39.22, 9.12), "Bergamo": (45.70, 9.67),
-            }
-            lat, lng = gps.get(citta, (41.9, 12.5))
-            lat += random.uniform(-0.08, 0.08)
-            lng += random.uniform(-0.08, 0.08)
-
-            try:
-                cur.execute(
-                    """INSERT INTO users (
-                           email, password_hash, username, nome, data_nascita, genere, orientamento,
-                           bio, citta, credits, stato, is_bot, is_online, latitude, longitude
-                       ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'attivo',1,1,%s,%s) RETURNING id""",
-                    (email, pwd_hash, username, nome, birth.isoformat(), genere, orientamento,
-                     bio, citta, credits, lat, lng),
-                )
-            except Exception as e:
-                print("bot insert full:", e)
-                c.rollback()
-                try:
-                    cur.execute(
-                        """INSERT INTO users (email, password_hash, username, nome, data_nascita, genere, orientamento, bio, citta, is_bot)
-                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,1) RETURNING id""",
-                        (email, pwd_hash, username, nome, birth.isoformat(), genere, orientamento, bio, citta),
-                    )
-                except Exception as e2:
-                    print("bot insert min:", e2)
-                    c.rollback()
-                    continue
-            row = cur.fetchone()
-            if not row:
-                continue
-            new_id = row["id"]
-            try:
-                cur.execute("UPDATE users SET is_bot=1, credits=%s WHERE id=%s", (credits, new_id))
-            except Exception:
-                pass
-            try:
-                cur.execute("INSERT INTO user_preferences (user_id) VALUES (%s) ON CONFLICT DO NOTHING", (new_id,))
-            except Exception:
-                try:
-                    c.rollback()
-                    cur.execute("INSERT INTO user_preferences (user_id) VALUES (%s)", (new_id,))
-                except Exception:
-                    pass
-            created_ids.append(new_id)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS bots (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER UNIQUE,
+                nome VARCHAR(100),
+                username VARCHAR(80),
+                email VARCHAR(200),
+                genere VARCHAR(20),
+                orientamento VARCHAR(30),
+                data_nascita DATE,
+                bio TEXT,
+                citta VARCHAR(100),
+                credits INTEGER DEFAULT 50,
+                latitude DOUBLE PRECISION,
+                longitude DOUBLE PRECISION,
+                foto_url TEXT,
+                attivo INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         c.commit()
-    except Exception as e:
-        print("admin_bot_create:", e)
+    except Exception:
         try:
             c.rollback()
         except Exception:
             pass
-        return RedirectResponse("/admin?tab=bot&err=create", 303)
-    finally:
+
+    created = 0
+    for _ in range(quanti):
+        nome = random.choice(nomi)
+        age = random.randint(21, 38)
+        today = date.today()
+        birth = date(today.year - age, random.randint(1, 12), random.randint(1, 28))
+        nick = nome.lower().replace("à","a").replace("è","e").replace("é","e").replace("ì","i").replace("ò","o").replace("ù","u")
+        username = f"bot_{nick}{random.randint(10,99)}{uuid.uuid4().hex[:4]}"
+        email = f"{username}@bot.mycheating.local"
+        citta = random.choice(CITTA)
+        bio = random.choice(BIOS)
+        credits = random.choice([30, 50, 80, 100])
+        pwd_hash = hash_pw("bot_" + uuid.uuid4().hex[:10])
+        lat, lng = gps.get(citta, (41.9, 12.5))
+        lat += random.uniform(-0.08, 0.08)
+        lng += random.uniform(-0.08, 0.08)
         try:
-            cur.close()
-            c.close()
+            # account ombra (non compare in lista utenti reali)
+            cur.execute(
+                """INSERT INTO users (
+                       email, password_hash, username, nome, data_nascita, genere, orientamento,
+                       bio, citta, credits, stato, is_bot, is_online, latitude, longitude
+                   ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'attivo',1,1,%s,%s) RETURNING id""",
+                (email, pwd_hash, username, nome, birth.isoformat(), genere, orientamento,
+                 bio, citta, credits, lat, lng),
+            )
+            uid = cur.fetchone()["id"]
+            cur.execute(
+                """INSERT INTO bots (user_id, nome, username, email, genere, orientamento, data_nascita, bio, citta, credits, latitude, longitude, attivo)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1)""",
+                (uid, nome, username, email, genere, orientamento, birth.isoformat(), bio, citta, credits, lat, lng),
+            )
+            try:
+                cur.execute("INSERT INTO user_preferences (user_id) VALUES (%s) ON CONFLICT DO NOTHING", (uid,))
+            except Exception:
+                try:
+                    c.rollback()
+                    # re-do minimal after rollback is bad - skip
+                except Exception:
+                    pass
+            created += 1
+        except Exception as e:
+            print("bot create one:", e)
+            try:
+                c.rollback()
+            except Exception:
+                pass
+    try:
+        c.commit()
+    except Exception as e:
+        print("bot commit:", e)
+        try:
+            c.rollback()
         except Exception:
             pass
-    if not created_ids:
+    cur.close()
+    c.close()
+    if created == 0:
         return RedirectResponse("/admin?tab=bot&err=create", 303)
-    return RedirectResponse(f"/admin?tab=bot&ok=created&n={len(created_ids)}", 303)
+    return RedirectResponse(f"/admin?tab=bot&ok=created&n={created}", 303)
 
 
 async def admin_bot_update(req: Request, bot_id: int):
@@ -3613,22 +3793,38 @@ async def admin_bot_update(req: Request, bot_id: int):
     form = await req.form()
     nome = (form.get("nome") or "").strip()
     username = (form.get("username") or "").strip()
-    bio = (form.get("bio") or "").strip() or None
     citta = (form.get("citta") or "").strip() or None
-    genere = form.get("genere") or None
+    bio = (form.get("bio") or "").strip() or None
+    genere = form.get("genere") or "altro"
     stato = form.get("stato") or "attivo"
     try:
         credits = int(form.get("credits") or 0)
     except Exception:
         credits = 0
+    attivo = 1 if stato == "attivo" else 0
     c = db()
     cur = c.cursor()
     try:
-        cur.execute(
-            """UPDATE users SET nome=%s, username=%s, bio=%s, citta=%s, genere=%s, stato=%s, credits=%s
-               WHERE id=%s""",
-            (nome, username, bio, citta, genere, stato, credits, bot_id),
-        )
+        cur.execute("SELECT user_id FROM bots WHERE id=%s", (bot_id,))
+        row = cur.fetchone()
+        if row and row.get("user_id"):
+            uid = row["user_id"]
+            cur.execute(
+                """UPDATE bots SET nome=%s, username=%s, bio=%s, citta=%s, genere=%s, credits=%s, attivo=%s WHERE id=%s""",
+                (nome, username, bio, citta, genere, credits, attivo, bot_id),
+            )
+            cur.execute(
+                """UPDATE users SET nome=%s, username=%s, bio=%s, citta=%s, genere=%s, stato=%s, credits=%s
+                   WHERE id=%s AND COALESCE(is_bot,0)=1""",
+                (nome, username, bio, citta, genere, stato, credits, uid),
+            )
+        else:
+            # legacy: bot_id era user id
+            cur.execute(
+                """UPDATE users SET nome=%s, username=%s, bio=%s, citta=%s, genere=%s, stato=%s, credits=%s
+                   WHERE id=%s""",
+                (nome, username, bio, citta, genere, stato, credits, bot_id),
+            )
         c.commit()
     except Exception as e:
         c.rollback()
@@ -3640,25 +3836,21 @@ async def admin_bot_update(req: Request, bot_id: int):
     return RedirectResponse("/admin?tab=bot&ok=updated", 303)
 
 
-@app.post("/admin/bots/{bot_id}/delete")
 async def admin_bot_delete(req: Request, bot_id: int):
     if not require_admin(req):
         return RedirectResponse("/login", 303)
     c = db()
     cur = c.cursor()
     try:
-        # non cancellare admin reali
-        cur.execute("SELECT COALESCE(is_admin,0) as is_admin, COALESCE(is_bot,0) as is_bot, email FROM users WHERE id=%s", (bot_id,))
+        cur.execute("SELECT user_id FROM bots WHERE id=%s", (bot_id,))
         row = cur.fetchone()
-        if not row:
-            cur.close()
-            c.close()
-            return RedirectResponse("/admin?tab=bot", 303)
-        if row["is_admin"] and not row["is_bot"]:
-            cur.close()
-            c.close()
-            return RedirectResponse("/admin?tab=bot&err=admin", 303)
-        cur.execute("DELETE FROM users WHERE id=%s", (bot_id,))
+        if row:
+            uid = row.get("user_id")
+            cur.execute("DELETE FROM bots WHERE id=%s", (bot_id,))
+            if uid:
+                cur.execute("DELETE FROM users WHERE id=%s AND COALESCE(is_bot,0)=1", (uid,))
+        else:
+            cur.execute("DELETE FROM users WHERE id=%s AND COALESCE(is_bot,0)=1", (bot_id,))
         c.commit()
     except Exception as e:
         c.rollback()
@@ -3668,6 +3860,7 @@ async def admin_bot_delete(req: Request, bot_id: int):
         cur.close()
         c.close()
     return RedirectResponse("/admin?tab=bot&ok=deleted", 303)
+
 
 @app.post("/admin/gifts/create")
 async def admin_gift_create(req: Request):

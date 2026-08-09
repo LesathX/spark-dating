@@ -198,3 +198,72 @@ CREATE TABLE IF NOT EXISTS blocks (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(blocker_id, blocked_id)
 );
+
+-- ========== BUCKET CHAT (Supabase Storage UI, non SQL) ==========
+-- 1. Supabase → Storage → New bucket
+-- 2. Nome: chat
+-- 3. Public: ON (così i media in chat sono visualizzabili)
+-- 4. Create
+-- 5. Render env (opzionale): CHAT_STORAGE_BUCKET=chat
+-- Gallery resta su bucket "gallery"; chat media su bucket "chat"
+
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'open';
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS reviewed_by INTEGER;
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP;
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS false_report INTEGER DEFAULT 0;
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip VARCHAR(64);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_bot INTEGER DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS false_reports_count INTEGER DEFAULT 0;
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'open';
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS reviewed_by INTEGER;
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP;
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS false_report INTEGER DEFAULT 0;
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS telefono VARCHAR(32);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified INTEGER DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMP;
+CREATE TABLE IF NOT EXISTS phone_otps (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    phone VARCHAR(32) NOT NULL,
+    code VARCHAR(10) NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    used INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS content_type VARCHAR(40);
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS content_id VARCHAR(40);
+
+-- BOT separati dagli utenti reali
+CREATE TABLE IF NOT EXISTS bots (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER UNIQUE,
+    nome VARCHAR(100),
+    username VARCHAR(80),
+    email VARCHAR(200),
+    genere VARCHAR(20),
+    orientamento VARCHAR(30),
+    data_nascita DATE,
+    bio TEXT,
+    citta VARCHAR(100),
+    credits INTEGER DEFAULT 50,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    foto_url TEXT,
+    attivo INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_users_is_bot ON users(is_bot);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified INTEGER DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMP;
+CREATE TABLE IF NOT EXISTS email_otps (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    email VARCHAR(200) NOT NULL,
+    code VARCHAR(10) NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    used INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

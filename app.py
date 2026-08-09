@@ -141,6 +141,15 @@ def haversine_km(lat1, lon1, lat2, lon2):
 PHOTO_ACCESS_COST = 25
 MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500 MB
 
+# Supabase Storage (produzione)
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://xbetgvmqqadkthydwxyr.supabase.co").rstrip("/")
+SUPABASE_SERVICE_KEY = os.environ.get(
+    "SUPABASE_SERVICE_KEY",
+    os.environ.get("SUPABASE_KEY", ""),  # service_role key consigliata
+)
+STORAGE_BUCKET = os.environ.get("STORAGE_BUCKET", "gallery")
+
+
 SPELLS = {
     "superlike": {"cost": 5, "label": "Super Like"},
     "messaggio_swipe": {"cost": 10, "label": "Messaggio al like"},
@@ -202,6 +211,45 @@ def require_mod(req):
     if user.get("is_admin") or user.get("is_mod") or user.get("ruolo") in ("admin", "mod"):
         return user
     return None
+
+
+def get_restrictions(user_id):
+    defaults = {
+        "no_gallery": 0, "no_like": 0, "no_messaggi": 0, "no_primo_messaggio": 0,
+        "no_scopri": 0, "no_chat": 0, "no_vedi_foto": 0, "no_commenti": 0, "no_storie": 0,
+    }
+    try:
+        c = db()
+        cur = c.cursor()
+        cur.execute("SELECT * FROM user_restrictions WHERE user_id=%s", (user_id,))
+        row = cur.fetchone()
+        cur.close()
+        c.close()
+        if row:
+            d = dict(row)
+            for k in defaults:
+                defaults[k] = int(d.get(k) or 0)
+        return defaults
+    except Exception as e:
+        print("get_restrictions:", e)
+        return defaults
+
+def is_suspended(user):
+    if not user:
+        return True
+    if user.get("stato") == "bannato":
+        return True
+    fino = user.get("sospeso_fino")
+    if fino:
+        from datetime import datetime
+        try:
+            if isinstance(fino, str):
+                fino = datetime.fromisoformat(fino.replace("Z", ""))
+            if fino > datetime.utcnow().replace(tzinfo=getattr(fino, "tzinfo", None)):
+                return True
+        except Exception:
+            pass
+    return False
 
 def require_admin(req):
     user = current_user(req)
@@ -389,6 +437,11 @@ async def discover(req: Request):
     user = current_user(req)
     if not user:
         return RedirectResponse("/login", 303)
+    if is_suspended(user):
+        return RedirectResponse("/profile?err=sospeso", 303)
+    r = get_restrictions(user["id"])
+    if r.get("no_scopri"):
+        return RedirectResponse("/profile?err=restrizione", 303)
 
     only_online = req.query_params.get("online") == "1"
 
@@ -507,6 +560,13 @@ async def swipe(req: Request, to_user_id: int = Form(...), tipo: str = Form(...)
     user = current_user(req)
     if not user:
         return RedirectResponse("/login", 303)
+    if is_suspended(user):
+        return RedirectResponse("/profile?err=sospeso", 303)
+    r = get_restrictions(user["id"])
+    if tipo in ("like", "superlike") and r.get("no_like"):
+        return RedirectResponse("/discover?err=no_like", 303)
+    if messaggio and r.get("no_primo_messaggio"):
+        messaggio = ""
     if tipo not in ("like", "dislike", "superlike"):
         return RedirectResponse("/discover", 303)
 
@@ -726,6 +786,11 @@ async def send_message(req: Request, conversation_id: int, contenuto: str = Form
     user = current_user(req)
     if not user:
         return RedirectResponse("/login", 303)
+    if is_suspended(user):
+        return RedirectResponse("/profile?err=sospeso", 303)
+    r = get_restrictions(user["id"])
+    if r.get("no_messaggi") or r.get("no_chat"):
+        return RedirectResponse(f"/chat/{conversation_id}?err=no_msg", 303)
     c = db()
     cur = c.cursor()
     cur.execute("""SELECT c.id, m.user1_id, m.user2_id FROM conversations c
@@ -945,17 +1010,20 @@ async def admin_panel(req: Request):
         if q:
             like = f"%{q}%"
             cur.execute("""
-                SELECT id, nome, username, email, stato, is_admin, is_mod, credits, is_online, latitude, longitude
+                SELECT id, nome, username, email, stato, is_admin, is_mod, credits, is_online, latitude, longitude, bio, citta, genere, orientamento, data_nascita, ruolo, sospeso_fino, note_admin
                 FROM users
                 WHERE nome ILIKE %s OR email ILIKE %s OR username ILIKE %s
                 ORDER BY id DESC LIMIT 100
             """, (like, like, like))
         else:
             cur.execute("""
-                SELECT id, nome, username, email, stato, is_admin, is_mod, credits, is_online, latitude, longitude
+                SELECT id, nome, username, email, stato, is_admin, is_mod, credits, is_online, latitude, longitude, bio, citta, genere, orientamento, data_nascita, ruolo, sospeso_fino, note_admin
                 FROM users ORDER BY id DESC LIMIT 100
             """)
         users = [dict(u) for u in cur.fetchall()]
+        for u in users:
+            u["restrictions"] = get_restrictions(u["id"])
+            u["sospeso"] = bool(u.get("sospeso_fino"))
 
     conversations = []
     open_conversation = None
@@ -1120,6 +1188,86 @@ async def admin_remove_admin(req: Request, user_id: int):
 
 # ============== FOTO PROFILO ==============
 
+
+def storage_enabled():
+    return bool(SUPABASE_URL and SUPABASE_SERVICE_KEY)
+
+
+async def storage_upload(path: str, data: bytes, content_type: str) -> str:
+    """Carica su Supabase Storage e ritorna URL pubblico (o path per privati)."""
+    import httpx
+    url = f"{SUPABASE_URL}/storage/v1/object/{STORAGE_BUCKET}/{path}"
+    headers = {
+        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+        "apikey": SUPABASE_SERVICE_KEY,
+        "Content-Type": content_type or "application/octet-stream",
+        "x-upsert": "true",
+    }
+    async with httpx.AsyncClient(timeout=300.0) as client:
+        r = await client.post(url, content=data, headers=headers)
+        if r.status_code not in (200, 201):
+            # retry with put
+            r = await client.put(url, content=data, headers=headers)
+        if r.status_code not in (200, 201):
+            raise RuntimeError(f"Storage upload failed: {r.status_code} {r.text[:300]}")
+    # URL pubblico
+    return f"{SUPABASE_URL}/storage/v1/object/public/{STORAGE_BUCKET}/{path}"
+
+
+async def storage_upload_stream(path: str, file_obj, content_type: str, max_bytes: int) -> tuple:
+    """Legge a chunk, carica su storage. Ritorna (public_url, size)."""
+    import httpx
+    # Per file grandi: buffer su temp poi upload (Supabase REST vuole body completo in una request)
+    import tempfile
+    size = 0
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        tmp_path = tmp.name
+        while True:
+            chunk = await file_obj.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > max_bytes:
+                tmp.close()
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+                raise ValueError("too_large")
+            tmp.write(chunk)
+    try:
+        with open(tmp_path, "rb") as f:
+            data = f.read()
+        public_url = await storage_upload(path, data, content_type)
+        return public_url, size
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+
+async def storage_signed_url(path: str, expires_sec: int = 3600) -> str:
+    """URL firmato per file privati."""
+    import httpx
+    # path relativo nel bucket
+    url = f"{SUPABASE_URL}/storage/v1/object/sign/{STORAGE_BUCKET}/{path}"
+    headers = {
+        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+        "apikey": SUPABASE_SERVICE_KEY,
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        r = await client.post(url, headers=headers, json={"expiresIn": expires_sec})
+        if r.status_code not in (200, 201):
+            raise RuntimeError(f"sign failed: {r.status_code} {r.text[:200]}")
+        data = r.json()
+        signed = data.get("signedURL") or data.get("signedUrl") or ""
+        if signed.startswith("http"):
+            return signed
+        return f"{SUPABASE_URL}/storage/v1{signed}"
+
+
 @app.get("/gallery", response_class=HTMLResponse)
 async def gallery_page_alias(req: Request):
     return await photos_page(req)
@@ -1157,6 +1305,11 @@ async def photos_upload(
     user = current_user(req)
     if not user:
         return RedirectResponse("/login", 303)
+    if is_suspended(user):
+        return RedirectResponse("/profile?err=sospeso", 303)
+    r = get_restrictions(user["id"])
+    if r.get("no_gallery"):
+        return RedirectResponse("/gallery?err=restrizione", 303)
 
     content_type = (file.content_type or "").lower()
     is_image = content_type.startswith("image/")
@@ -1180,60 +1333,83 @@ async def photos_upload(
             ext = "webm"
         elif "quicktime" in content_type or "mov" in content_type:
             ext = "mov"
-        elif "3gpp" in content_type:
-            ext = "3gp"
         else:
             name = (file.filename or "").lower()
-            for e in ("mp4", "webm", "mov", "m4v", "avi"):
+            for e in ("mp4", "webm", "mov", "m4v"):
                 if name.endswith("." + e):
                     ext = e
                     break
             else:
                 ext = "mp4"
 
-    user_dir = BASE_DIR / "static" / "uploads" / str(user["id"])
-    user_dir.mkdir(parents=True, exist_ok=True)
-    fname = f"{uuid.uuid4().hex}.{ext}"
-    fpath = user_dir / fname
+    private = 1 if int(is_private) else 0
+    folder = "private" if private else "public"
+    object_path = f"{folder}/{user['id']}/{uuid.uuid4().hex}.{ext}"
 
-    size = 0
-    try:
-        with open(fpath, "wb") as out:
-            while True:
-                chunk = await file.read(1024 * 1024)  # 1MB chunks
-                if not chunk:
-                    break
-                size += len(chunk)
-                if size > MAX_UPLOAD_BYTES:
-                    out.close()
-                    fpath.unlink(missing_ok=True)
-                    return RedirectResponse("/gallery?err=grande", 303)
-                out.write(chunk)
-    except Exception as e:
-        print("upload stream error:", e)
+    url = None
+    storage_path = None
+
+    if storage_enabled():
         try:
-            fpath.unlink(missing_ok=True)
-        except Exception:
-            pass
-        return RedirectResponse("/gallery?err=db", 303)
-
-    url = f"/static/uploads/{user['id']}/{fname}"
+            public_url, size = await storage_upload_stream(
+                object_path, file, content_type, MAX_UPLOAD_BYTES
+            )
+            storage_path = object_path
+            if private:
+                # salva path interno; URL pubblico non esporre
+                url = f"/gallery/file/{object_path}"
+            else:
+                url = public_url
+        except ValueError:
+            return RedirectResponse("/gallery?err=grande", 303)
+        except Exception as e:
+            print("supabase upload error:", e)
+            return RedirectResponse("/gallery?err=storage", 303)
+    else:
+        # fallback locale (dev)
+        user_dir = BASE_DIR / "static" / "uploads" / str(user["id"])
+        user_dir.mkdir(parents=True, exist_ok=True)
+        fname = f"{uuid.uuid4().hex}.{ext}"
+        fpath = user_dir / fname
+        size = 0
+        try:
+            with open(fpath, "wb") as out:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > MAX_UPLOAD_BYTES:
+                        out.close()
+                        fpath.unlink(missing_ok=True)
+                        return RedirectResponse("/gallery?err=grande", 303)
+                    out.write(chunk)
+        except Exception as e:
+            print("local upload error:", e)
+            return RedirectResponse("/gallery?err=db", 303)
+        url = f"/static/uploads/{user['id']}/{fname}"
 
     c = db()
     cur = c.cursor()
     try:
         try:
             cur.execute(
-                "INSERT INTO user_photos (user_id, url, is_private, media_type) VALUES (%s, %s, %s, %s)",
-                (user["id"], url, 1 if int(is_private) else 0, media_type),
+                """INSERT INTO user_photos (user_id, url, is_private, media_type)
+                   VALUES (%s, %s, %s, %s) RETURNING id""",
+                (user["id"], url, private, media_type),
             )
         except Exception:
             c.rollback()
             cur.execute(
-                "INSERT INTO user_photos (user_id, url, is_private) VALUES (%s, %s, %s)",
-                (user["id"], url, 1 if int(is_private) else 0),
+                "INSERT INTO user_photos (user_id, url, is_private) VALUES (%s, %s, %s) RETURNING id",
+                (user["id"], url, private),
             )
-        if not int(is_private) and media_type == "image":
+        row = cur.fetchone()
+        # se abbiamo storage_path privato, salva anche nel url come marker
+        if storage_path and private:
+            # url già /gallery/file/...
+            pass
+        if not private and media_type == "image":
             cur.execute(
                 "UPDATE users SET foto_principale_url=%s WHERE id=%s AND (foto_principale_url IS NULL OR foto_principale_url='')",
                 (url, user["id"]),
@@ -1241,12 +1417,46 @@ async def photos_upload(
         c.commit()
     except Exception as e:
         c.rollback()
-        print("photos_upload:", e)
+        print("photos_upload db:", e)
         return RedirectResponse("/gallery?err=db", 303)
     finally:
         cur.close()
         c.close()
     return RedirectResponse("/gallery", 303)
+
+
+@app.get("/gallery/file/{file_path:path}")
+async def gallery_private_file(req: Request, file_path: str):
+    """Serve file privato: solo owner o chi ha consenso. Redirect a signed URL Supabase."""
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    # path tipo private/123/uuid.mp4
+    parts = file_path.split("/")
+    if len(parts) < 2 or parts[0] not in ("private", "public"):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    try:
+        owner_id = int(parts[1])
+    except Exception:
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    if user["id"] != owner_id and not has_photo_access(user["id"], owner_id):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+
+    if not storage_enabled():
+        # locale
+        local = BASE_DIR / "static" / "uploads" / str(owner_id) / parts[-1]
+        if local.exists():
+            from fastapi.responses import FileResponse
+            return FileResponse(str(local))
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    try:
+        signed = await storage_signed_url(file_path, expires_sec=3600)
+        return RedirectResponse(signed, status_code=302)
+    except Exception as e:
+        print("signed url error:", e)
+        return JSONResponse({"error": "storage"}, status_code=500)
 
 
 
@@ -1645,4 +1855,109 @@ async def admin_backup_auto(req: Request):
     except Exception as e:
         print("auto backup write:", e)
     return JSONResponse({"ok": True, "tables": list(data.keys())})
+
+
+
+@app.get("/admin/user/{user_id}")
+async def admin_user_get(req: Request, user_id: int):
+    if not require_admin(req):
+        return JSONResponse({"ok": False}, status_code=401)
+    c = db()
+    cur = c.cursor()
+    cur.execute("SELECT * FROM users WHERE id=%s", (user_id,))
+    u = cur.fetchone()
+    cur.close()
+    c.close()
+    if not u:
+        return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+    d = dict(u)
+    for k, v in list(d.items()):
+        if hasattr(v, "isoformat"):
+            d[k] = v.isoformat()
+    d.pop("password_hash", None)
+    d["restrictions"] = get_restrictions(user_id)
+    return JSONResponse({"ok": True, "user": d})
+
+
+@app.post("/admin/user/{user_id}/update")
+async def admin_user_update(req: Request, user_id: int):
+    admin = require_admin(req)
+    if not admin:
+        return RedirectResponse("/login", 303)
+    form = await req.form()
+    nome = form.get("nome") or ""
+    username = form.get("username") or ""
+    email = form.get("email") or ""
+    bio = form.get("bio") or ""
+    citta = form.get("citta") or ""
+    genere = form.get("genere") or ""
+    orientamento = form.get("orientamento") or ""
+    data_nascita = form.get("data_nascita") or None
+    credits = form.get("credits")
+    note_admin = form.get("note_admin") or ""
+    ruolo = form.get("ruolo") or "user"
+    stato = form.get("stato") or "attivo"
+    sospeso_fino = form.get("sospeso_fino") or None
+    if sospeso_fino == "":
+        sospeso_fino = None
+
+    is_admin = 1 if ruolo == "admin" else 0
+    is_mod = 1 if ruolo == "mod" else 0
+    if ruolo == "admin":
+        is_mod = 0
+
+    # restrictions checkboxes
+    flags = [
+        "no_gallery", "no_like", "no_messaggi", "no_primo_messaggio",
+        "no_scopri", "no_chat", "no_vedi_foto", "no_commenti", "no_storie",
+    ]
+    restr = {f: 1 if form.get(f) else 0 for f in flags}
+
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute(
+            """UPDATE users SET
+                nome=%s, username=%s, email=%s, bio=%s, citta=%s, genere=%s,
+                orientamento=%s, data_nascita=COALESCE(%s, data_nascita),
+                ruolo=%s, is_admin=%s, is_mod=%s, stato=%s,
+                sospeso_fino=%s, note_admin=%s,
+                credits=COALESCE(%s, credits)
+            WHERE id=%s""",
+            (
+                nome, username, email, bio or None, citta or None, genere or None,
+                orientamento or None, data_nascita or None,
+                ruolo, is_admin, is_mod, stato,
+                sospeso_fino, note_admin or None,
+                int(credits) if credits not in (None, "") else None,
+                user_id,
+            ),
+        )
+        cur.execute(
+            """INSERT INTO user_restrictions (
+                user_id, no_gallery, no_like, no_messaggi, no_primo_messaggio,
+                no_scopri, no_chat, no_vedi_foto, no_commenti, no_storie, updated_at
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id) DO UPDATE SET
+                no_gallery=EXCLUDED.no_gallery, no_like=EXCLUDED.no_like,
+                no_messaggi=EXCLUDED.no_messaggi, no_primo_messaggio=EXCLUDED.no_primo_messaggio,
+                no_scopri=EXCLUDED.no_scopri, no_chat=EXCLUDED.no_chat,
+                no_vedi_foto=EXCLUDED.no_vedi_foto, no_commenti=EXCLUDED.no_commenti,
+                no_storie=EXCLUDED.no_storie, updated_at=CURRENT_TIMESTAMP
+            """,
+            (
+                user_id, restr["no_gallery"], restr["no_like"], restr["no_messaggi"],
+                restr["no_primo_messaggio"], restr["no_scopri"], restr["no_chat"],
+                restr["no_vedi_foto"], restr["no_commenti"], restr["no_storie"],
+            ),
+        )
+        c.commit()
+    except Exception as e:
+        c.rollback()
+        print("admin_user_update:", e)
+    finally:
+        cur.close()
+        c.close()
+    return RedirectResponse("/admin?managed=" + str(user_id), 303)
+
 

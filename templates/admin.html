@@ -119,6 +119,10 @@
                             </td>
                             <td class="px-3 py-3">
                                 <div class="flex flex-wrap gap-1">
+                                    <button type="button" onclick='openManage({{ u.id }})'
+                                        class="text-[10px] bg-[#ff0000] text-white px-2 py-1 rounded font-semibold">
+                                        GESTISCI
+                                    </button>
                                     {% if u.stato == 'attivo' %}
                                     <form method="post" action="/admin/ban/{{ u.id }}">
                                         <button class="text-[10px] bg-red-500/20 text-red-pure px-2 py-1 rounded">Ban</button>
@@ -273,5 +277,161 @@
             </a>
         </div>
     </nav>
+
+<!-- Modal GESTISCI utente -->
+<div id="manage-modal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 p-3">
+  <div class="bg-[#121212] border border-white/10 rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl">
+    <div class="sticky top-0 bg-[#121212] border-b border-white/10 px-4 py-3 flex items-center justify-between">
+      <div class="font-hot text-xl tracking-wide"><span class="text-red-pure">⚙️</span> GESTISCI UTENTE</div>
+      <button type="button" onclick="closeManage()" class="text-gray-400 text-xl px-2">✕</button>
+    </div>
+    <form id="manage-form" method="post" action="/admin/user/0/update" class="p-4 space-y-4 text-sm">
+      <input type="hidden" name="user_id_display" id="m-id-label" value="">
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-[10px] text-gray-500">Nome</label>
+          <input name="nome" id="m-nome" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
+        </div>
+        <div>
+          <label class="text-[10px] text-gray-500">Username</label>
+          <input name="username" id="m-username" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
+        </div>
+      </div>
+      <div>
+        <label class="text-[10px] text-gray-500">Email</label>
+        <input name="email" id="m-email" type="email" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-[10px] text-gray-500">Città</label>
+          <input name="citta" id="m-citta" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
+        </div>
+        <div>
+          <label class="text-[10px] text-gray-500">Data nascita</label>
+          <input name="data_nascita" id="m-nascita" type="date" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-[10px] text-gray-500">Genere</label>
+          <input name="genere" id="m-genere" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
+        </div>
+        <div>
+          <label class="text-[10px] text-gray-500">Orientamento</label>
+          <input name="orientamento" id="m-orientamento" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
+        </div>
+      </div>
+      <div>
+        <label class="text-[10px] text-gray-500">Bio</label>
+        <textarea name="bio" id="m-bio" rows="2" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white"></textarea>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-[10px] text-gray-500">Crediti</label>
+          <input name="credits" id="m-credits" type="number" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
+        </div>
+        <div>
+          <label class="text-[10px] text-gray-500">Ruolo</label>
+          <select name="ruolo" id="m-ruolo" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
+            <option value="user">Utente</option>
+            <option value="mod">Moderatore</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-[10px] text-gray-500">Stato</label>
+          <select name="stato" id="m-stato" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
+            <option value="attivo">Attivo</option>
+            <option value="bannato">Bannato</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-[10px] text-gray-500">Sospeso fino (vuoto = no)</label>
+          <input name="sospeso_fino" id="m-sospeso" type="datetime-local" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
+        </div>
+      </div>
+      <div>
+        <label class="text-[10px] text-gray-500">Note admin</label>
+        <textarea name="note_admin" id="m-note" rows="2" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white"></textarea>
+      </div>
+
+      <div class="border-t border-white/10 pt-3">
+        <div class="font-hot text-base mb-2 text-red-pure">RESTRIZIONI</div>
+        <div class="grid grid-cols-1 gap-2 text-xs text-gray-300">
+          <label class="flex gap-2 items-center"><input type="checkbox" name="no_scopri" id="r-scopri" class="accent-[#ff0000]"> Vietare accesso a Scopri</label>
+          <label class="flex gap-2 items-center"><input type="checkbox" name="no_chat" id="r-chat" class="accent-[#ff0000]"> Vietare accesso Chat / Match</label>
+          <label class="flex gap-2 items-center"><input type="checkbox" name="no_messaggi" id="r-msg" class="accent-[#ff0000]"> Vietare di scrivere messaggi</label>
+          <label class="flex gap-2 items-center"><input type="checkbox" name="no_like" id="r-like" class="accent-[#ff0000]"> Vietare di mettere like</label>
+          <label class="flex gap-2 items-center"><input type="checkbox" name="no_primo_messaggio" id="r-primo" class="accent-[#ff0000]"> Vietare primo messaggio allo swipe</label>
+          <label class="flex gap-2 items-center"><input type="checkbox" name="no_gallery" id="r-gallery" class="accent-[#ff0000]"> Vietare upload Gallery (foto/video)</label>
+          <label class="flex gap-2 items-center"><input type="checkbox" name="no_vedi_foto" id="r-vedi" class="accent-[#ff0000]"> Vietare di vedere foto altrui</label>
+          <label class="flex gap-2 items-center"><input type="checkbox" name="no_commenti" id="r-commenti" class="accent-[#ff0000]"> Vietare commenti</label>
+          <label class="flex gap-2 items-center"><input type="checkbox" name="no_storie" id="r-storie" class="accent-[#ff0000]"> Vietare storie</label>
+        </div>
+      </div>
+
+      <button type="submit" class="w-full bg-[#ff0000] text-white font-semibold py-3 rounded-xl">SALVA MODIFICHE</button>
+    </form>
+  </div>
+</div>
+
+<script>
+async function openManage(id) {
+  const modal = document.getElementById('manage-modal');
+  const form = document.getElementById('manage-form');
+  form.action = '/admin/user/' + id + '/update';
+  modal.classList.remove('hidden');
+  try {
+    const res = await fetch('/admin/user/' + id);
+    const data = await res.json();
+    if (!data.ok) { alert('Utente non trovato'); return; }
+    const u = data.user;
+    const r = u.restrictions || {};
+    document.getElementById('m-nome').value = u.nome || '';
+    document.getElementById('m-username').value = u.username || '';
+    document.getElementById('m-email').value = u.email || '';
+    document.getElementById('m-citta').value = u.citta || '';
+    document.getElementById('m-bio').value = u.bio || '';
+    document.getElementById('m-genere').value = u.genere || '';
+    document.getElementById('m-orientamento').value = u.orientamento || '';
+    document.getElementById('m-credits').value = u.credits ?? 0;
+    document.getElementById('m-note').value = u.note_admin || '';
+    document.getElementById('m-ruolo').value = u.ruolo || (u.is_admin ? 'admin' : (u.is_mod ? 'mod' : 'user'));
+    document.getElementById('m-stato').value = u.stato || 'attivo';
+    if (u.data_nascita) {
+      document.getElementById('m-nascita').value = String(u.data_nascita).slice(0, 10);
+    } else {
+      document.getElementById('m-nascita').value = '';
+    }
+    if (u.sospeso_fino) {
+      let s = String(u.sospeso_fino).replace(' ', 'T').slice(0, 16);
+      document.getElementById('m-sospeso').value = s;
+    } else {
+      document.getElementById('m-sospeso').value = '';
+    }
+    document.getElementById('r-scopri').checked = !!r.no_scopri;
+    document.getElementById('r-chat').checked = !!r.no_chat;
+    document.getElementById('r-msg').checked = !!r.no_messaggi;
+    document.getElementById('r-like').checked = !!r.no_like;
+    document.getElementById('r-primo').checked = !!r.no_primo_messaggio;
+    document.getElementById('r-gallery').checked = !!r.no_gallery;
+    document.getElementById('r-vedi').checked = !!r.no_vedi_foto;
+    document.getElementById('r-commenti').checked = !!r.no_commenti;
+    document.getElementById('r-storie').checked = !!r.no_storie;
+  } catch (e) {
+    alert('Errore caricamento utente');
+  }
+}
+function closeManage() {
+  document.getElementById('manage-modal').classList.add('hidden');
+}
+document.getElementById('manage-modal')?.addEventListener('click', function(e) {
+  if (e.target === this) closeManage();
+});
+</script>
+
 </body>
 </html>

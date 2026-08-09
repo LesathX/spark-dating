@@ -63,3 +63,41 @@ CREATE TABLE IF NOT EXISTS photo_access_requests (
 
 ALTER TABLE user_photos ADD COLUMN IF NOT EXISTS media_type VARCHAR(20) DEFAULT 'image';
 ALTER TABLE user_photos ADD COLUMN IF NOT EXISTS media_type VARCHAR(20) DEFAULT 'image';
+
+-- Restrizioni e sospensione utenti
+ALTER TABLE users ADD COLUMN IF NOT EXISTS sospeso_fino TIMESTAMP;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS note_admin TEXT;
+
+CREATE TABLE IF NOT EXISTS user_restrictions (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    no_gallery INTEGER DEFAULT 0,
+    no_like INTEGER DEFAULT 0,
+    no_messaggi INTEGER DEFAULT 0,
+    no_primo_messaggio INTEGER DEFAULT 0,
+    no_scopri INTEGER DEFAULT 0,
+    no_chat INTEGER DEFAULT 0,
+    no_vedi_foto INTEGER DEFAULT 0,
+    no_storie INTEGER DEFAULT 0,
+    no_commenti INTEGER DEFAULT 0,
+    no_superlike INTEGER DEFAULT 0,
+    no_swipe_messaggio INTEGER DEFAULT 0,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Sospensione e restrizioni utente
+ALTER TABLE users ADD COLUMN IF NOT EXISTS sospeso_fino TIMESTAMP;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS note_admin TEXT;
+
+CREATE TABLE IF NOT EXISTS user_restrictions (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    no_gallery INTEGER DEFAULT 0,
+    no_like INTEGER DEFAULT 0,
+    no_messaggi INTEGER DEFAULT 0,
+    no_primo_messaggio INTEGER DEFAULT 0,
+    no_scopri INTEGER DEFAULT 0,
+    no_chat INTEGER DEFAULT 0,
+    no_vedi_foto INTEGER DEFAULT 0,
+    no_commenti INTEGER DEFAULT 0,
+    no_storie INTEGER DEFAULT 0,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

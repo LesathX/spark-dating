@@ -3,435 +3,425 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin – MyCheating</title>
+    <title>Gestione Utenti – MyCheating</title>
     <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { background: #0a0a0a; font-family: 'Oswald', sans-serif; }
+        body { background: #000; font-family: 'Oswald', sans-serif; }
         .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
         .text-red-pure { color: #ff0000; }
-        input:focus, select:focus { border-color: #ff0000 !important; outline: none; }
+        .tab-active { color: #ff0000; border-bottom: 2px solid #ff0000; }
+        .tab-btn { border-bottom: 2px solid transparent; }
+        input, select, textarea { background: #0a0a0a; border: 1px solid #222; color: #fff; }
+        input:focus, select:focus, textarea:focus { border-color: #ff0000; outline: none; }
     </style>
 </head>
-<body class="text-white min-h-screen pb-28">
+<body class="text-white min-h-screen pb-24">
 
-    <!-- Top -->
-    <div class="sticky top-0 z-20 bg-[#0a0a0a]/95 backdrop-blur border-b border-white/10 px-4 py-3 flex items-center justify-between">
-        <div class="font-hot text-xl tracking-wider flex items-center gap-2">
-            <span class="text-red-pure">⚙️</span> ADMIN
-        </div>
-        <div class="flex gap-2 items-center">
-            <a href="/admin/backup" class="text-xs bg-[#ff0000] text-white px-3 py-1.5 rounded-lg font-semibold">Backup</a>
-            <a href="/discover" class="text-sm text-gray-400 hover:text-white">← App</a>
-        </div>
+<div class="max-w-6xl mx-auto px-4 py-6">
+    <!-- Breadcrumb -->
+    <div class="flex items-center justify-between text-xs text-gray-500 mb-6">
+        <div><span class="text-gray-400">ADMIN</span> <span class="mx-1">/</span> <span class="text-white">GESTIONE UTENTI</span></div>
+        <a href="/discover" class="border border-white/20 px-3 py-1.5 rounded-lg hover:border-white/40">← Torna all'app</a>
     </div>
 
-    <div class="max-w-5xl mx-auto px-4 py-6">
-
-        <!-- Stats -->
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-            <div class="bg-gradient-to-br from-[#ff0000]/20 to-transparent border border-[#ff0000]/30 rounded-2xl p-4 text-center">
-                <div class="text-3xl font-hot text-red-pure">{{ stats.users }}</div>
-                <div class="text-[10px] text-gray-500 tracking-widest mt-1">UTENTI</div>
-            </div>
-            <div class="bg-white/5 border border-white/10 rounded-2xl p-4 text-center">
-                <div class="text-3xl font-hot text-red-pure">{{ stats.matches }}</div>
-                <div class="text-[10px] text-gray-500 tracking-widest mt-1">MATCH</div>
-            </div>
-            <div class="bg-white/5 border border-white/10 rounded-2xl p-4 text-center">
-                <div class="text-3xl font-hot text-red-pure">{{ stats.messages }}</div>
-                <div class="text-[10px] text-gray-500 tracking-widest mt-1">MESSAGGI</div>
-            </div>
-            <div class="bg-white/5 border border-white/10 rounded-2xl p-4 text-center">
-                <div class="text-3xl font-hot text-green-400">{{ stats.online }}</div>
-                <div class="text-[10px] text-gray-500 tracking-widest mt-1">ONLINE</div>
-            </div>
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div>
+            <h1 class="font-hot text-4xl tracking-wide">UTENTI</h1>
+            <p class="text-gray-500 text-sm">{{ users|length }} utenti in questa pagina</p>
         </div>
-
-        <!-- Extra stats -->
-        <div class="grid grid-cols-3 gap-3 mb-8">
-            <div class="bg-white/5 border border-white/10 rounded-xl p-3 text-center">
-                <div class="text-xl font-hot">{{ stats.swipes }}</div>
-                <div class="text-[10px] text-gray-500">SWIPE</div>
-            </div>
-            <div class="bg-white/5 border border-white/10 rounded-xl p-3 text-center">
-                <div class="text-xl font-hot text-red-400">{{ stats.banned }}</div>
-                <div class="text-[10px] text-gray-500">BANNATI</div>
-            </div>
-            <div class="bg-white/5 border border-white/10 rounded-xl p-3 text-center">
-                <div class="text-xl font-hot">{{ stats.gps }}</div>
-                <div class="text-[10px] text-gray-500">CON GPS</div>
-            </div>
-        </div>
-
-        <!-- Search -->
-        <form method="get" action="/admin" class="mb-6 flex gap-2">
-            <input type="text" name="q" value="{{ q or '' }}" placeholder="Cerca nome, email, username..."
-                   class="flex-1 bg-white/5 border border-white/15 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500">
-            <button class="bg-[#ff0000] px-5 py-3 rounded-xl font-semibold text-sm">Cerca</button>
-            {% if q %}<a href="/admin" class="bg-white/10 px-4 py-3 rounded-xl text-sm flex items-center">✕</a>{% endif %}
-        </form>
-
-        <!-- Tabs -->
-        <div class="flex gap-2 mb-5 overflow-x-auto text-sm">
-            <a href="/admin" class="shrink-0 px-4 py-2 rounded-full {% if not tab or tab == 'users' %}bg-[#ff0000] text-white{% else %}bg-white/5 text-gray-400 border border-white/10{% endif %}">Utenti</a>
-            <a href="/admin?tab=messages" class="shrink-0 px-4 py-2 rounded-full {% if tab == 'messages' %}bg-[#ff0000] text-white{% else %}bg-white/5 text-gray-400 border border-white/10{% endif %}">Messaggi</a>
-            <a href="/admin?tab=matches" class="shrink-0 px-4 py-2 rounded-full {% if tab == 'matches' %}bg-[#ff0000] text-white{% else %}bg-white/5 text-gray-400 border border-white/10{% endif %}">Match</a>
-            <a href="/admin?tab=online" class="shrink-0 px-4 py-2 rounded-full {% if tab == 'online' %}bg-[#ff0000] text-white{% else %}bg-white/5 text-gray-400 border border-white/10{% endif %}">Online</a>
-        </div>
-
-        {% if not tab or tab == 'users' %}
-        <!-- Users table -->
-        <h2 class="font-hot text-2xl tracking-wide mb-3">UTENTI {% if q %}<span class="text-sm text-gray-500">· risultati per "{{ q }}"</span>{% endif %}</h2>
-        <div class="bg-white/5 border border-white/10 rounded-2xl overflow-hidden mb-8">
-            <div class="overflow-x-auto">
-                <table class="w-full text-sm">
-                    <thead class="border-b border-white/10 text-gray-500 text-left text-xs">
-                        <tr>
-                            <th class="px-3 py-3">ID</th>
-                            <th class="px-3 py-3">Utente</th>
-                            <th class="px-3 py-3">Email</th>
-                            <th class="px-3 py-3">Stato</th>
-                            <th class="px-3 py-3">GPS</th>
-                            <th class="px-3 py-3">Azioni</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for u in users %}
-                        <tr class="border-b border-white/5 hover:bg-white/5">
-                            <td class="px-3 py-3 text-gray-500">{{ u.id }}</td>
-                            <td class="px-3 py-3">
-                                <div class="font-hot">{{ u.nome }}</div>
-                                <div class="text-xs text-gray-500">@{{ u.username }}</div>
-                                {% if u.is_admin %}<span class="text-[10px] bg-red-500/20 text-red-pure px-1.5 py-0.5 rounded">ADMIN</span>{% endif %}
-                                {% if u.is_online %}<span class="text-[10px] text-green-400">● online</span>{% endif %}
-                            </td>
-                            <td class="px-3 py-3 text-gray-400 text-xs">{{ u.email }}</td>
-                            <td class="px-3 py-3">
-                                {% if u.stato == 'attivo' %}
-                                <span class="text-green-400 text-xs">attivo</span>
-                                {% else %}
-                                <span class="text-red-400 text-xs">{{ u.stato }}</span>
-                                {% endif %}
-                            </td>
-                            <td class="px-3 py-3 text-xs">
-                                {% if u.latitude %}📍{% else %}—{% endif %}
-                            </td>
-                            <td class="px-3 py-3">
-                                <div class="flex flex-wrap gap-1">
-                                    <button type="button" onclick='openManage({{ u.id }})'
-                                        class="text-[10px] bg-[#ff0000] text-white px-2 py-1 rounded font-semibold">
-                                        GESTISCI
-                                    </button>
-                                    {% if u.stato == 'attivo' %}
-                                    <form method="post" action="/admin/ban/{{ u.id }}">
-                                        <button class="text-[10px] bg-red-500/20 text-red-pure px-2 py-1 rounded">Ban</button>
-                                    </form>
-                                    {% else %}
-                                    <form method="post" action="/admin/unban/{{ u.id }}">
-                                        <button class="text-[10px] bg-green-500/20 text-green-400 px-2 py-1 rounded">Unban</button>
-                                    </form>
-                                    {% endif %}
-                                    {% if not u.is_admin %}
-                                    <form method="post" action="/admin/make_admin/{{ u.id }}">
-                                        <button class="text-[10px] bg-white/10 text-gray-300 px-2 py-1 rounded">Admin+</button>
-                                    </form>
-                                    {% if not u.is_mod %}
-                                    <form method="post" action="/admin/make_mod/{{ u.id }}">
-                                        <button class="text-[10px] bg-orange-500/20 text-orange-300 px-2 py-1 rounded">Mod+</button>
-                                    </form>
-                                    {% else %}
-                                    <form method="post" action="/admin/remove_mod/{{ u.id }}">
-                                        <button class="text-[10px] bg-orange-500/10 text-orange-400/70 px-2 py-1 rounded">Mod−</button>
-                                    </form>
-                                    {% endif %}
-                                    <form method="post" action="/admin/credits/{{ u.id }}" class="inline-flex gap-1">
-                                        <input type="number" name="amount" value="50" class="w-12 bg-black/40 border border-white/10 rounded text-[10px] px-1">
-                                        <button class="text-[10px] bg-[#ff0000]/30 text-[#ff0000] px-2 py-1 rounded">+CR</button>
-                                    </form>
-                                    <form method="post" action="/admin/delete/{{ u.id }}" onsubmit="return confirm('Eliminare {{ u.nome }}?')">
-                                        <button class="text-[10px] bg-white/5 text-gray-500 px-2 py-1 rounded">Del</button>
-                                    </form>
-                                    {% else %}
-                                    {% if u.id != user.id %}
-                                    <form method="post" action="/admin/remove_admin/{{ u.id }}">
-                                        <button class="text-[10px] bg-white/10 text-gray-400 px-2 py-1 rounded">Admin−</button>
-                                    </form>
-                                    {% endif %}
-                                    {% endif %}
-                                </div>
-                            </td>
-                        </tr>
-                        {% else %}
-                        <tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">Nessun utente</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        {% endif %}
-
-        {% if tab == 'messages' %}
-        <h2 class="font-hot text-2xl tracking-wide mb-3">TUTTE LE CONVERSAZIONI</h2>
-        <p class="text-gray-500 text-sm mb-4">{{ conversations|length }} conversazioni</p>
-
-        {% if open_conversation %}
-        <div class="mb-4">
-            <a href="/admin?tab=messages" class="text-sm text-red-pure">← Torna alle conversazioni</a>
-            <div class="mt-2 mb-3 font-hot text-lg">
-                {{ open_conversation.nome1 }} <span class="text-red-pure">💬</span> {{ open_conversation.nome2 }}
-            </div>
-            <div class="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3 max-h-[60vh] overflow-y-auto mb-8">
-                {% for m in thread_messages %}
-                <div class="text-sm {% if m.sender_id == open_conversation.user1_id %}text-right{% endif %}">
-                    <div class="inline-block max-w-[85%] px-3 py-2 rounded-xl {% if m.sender_id == open_conversation.user1_id %}bg-[#ff0000]/30{% else %}bg-white/10{% endif %}">
-                        <div class="text-[10px] text-gray-400 mb-0.5">{{ m.sender_nome }} · {{ m.data_invio }}</div>
-                        <div>{{ m.contenuto }}</div>
-                    </div>
-                </div>
-                {% else %}
-                <p class="text-gray-500 text-sm text-center py-6">Nessun messaggio in questa chat</p>
-                {% endfor %}
-            </div>
-        </div>
-        {% else %}
-        <div class="space-y-2 mb-8">
-            {% for c in conversations %}
-            <a href="/admin?tab=messages&conv={{ c.id }}" class="block bg-white/5 border border-white/10 rounded-xl p-4 hover:border-[#ff0000]/40 transition">
-                <div class="flex justify-between items-start gap-2">
-                    <div>
-                        <div class="font-hot text-base">{{ c.nome1 }} <span class="text-red-pure">↔</span> {{ c.nome2 }}</div>
-                        <p class="text-sm text-gray-400 mt-1 truncate">{{ c.last_message or 'Nessun messaggio' }}</p>
-                    </div>
-                    <div class="text-right shrink-0">
-                        <div class="text-[10px] text-gray-500">{{ c.msg_count }} msg</div>
-                        <div class="text-[10px] text-gray-600 mt-1">{{ c.ultimo_messaggio_at or c.data_match }}</div>
-                    </div>
-                </div>
-            </a>
-            {% else %}
-            <p class="text-gray-500 text-sm">Nessuna conversazione</p>
-            {% endfor %}
-        </div>
-        {% endif %}
-        {% endif %}
-
-        {% if tab == 'matches' %}
-        <h2 class="font-hot text-2xl tracking-wide mb-3">ULTIMI MATCH</h2>
-        <div class="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2 mb-8">
-            {% for m in recent_matches %}
-            <div class="flex justify-between items-center py-2 border-b border-white/5 text-sm">
-                <span class="font-hot">{{ m.nome1 }} <span class="text-red-pure">♥</span> {{ m.nome2 }}</span>
-                <span class="text-gray-500 text-xs">{{ m.data_match }}</span>
-            </div>
-            {% else %}
-            <p class="text-gray-500 text-sm">Nessun match</p>
-            {% endfor %}
-        </div>
-        {% endif %}
-
-        {% if tab == 'online' %}
-        <h2 class="font-hot text-2xl tracking-wide mb-3">UTENTI ONLINE</h2>
-        <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-8">
-            {% for u in online_users %}
-            <div class="bg-white/5 border border-green-500/20 rounded-xl p-3 flex items-center gap-3">
-                <div class="w-10 h-10 rounded-full bg-gradient-to-br from-red-700 to-black flex items-center justify-center font-hot relative">
-                    {{ u.nome[0] | upper }}
-                    <span class="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-400 border-2 border-[#0a0a0a] rounded-full"></span>
-                </div>
-                <div>
-                    <div class="font-hot text-sm">{{ u.nome }}</div>
-                    <div class="text-[10px] text-gray-500">@{{ u.username }}</div>
-                </div>
-            </div>
-            {% else %}
-            <p class="text-gray-500 text-sm col-span-2">Nessuno online</p>
-            {% endfor %}
-        </div>
-        {% endif %}
-
+        <button type="button" class="bg-[#ff0000] text-white font-semibold px-4 py-2.5 rounded-lg text-sm shadow-[0_0_20px_rgba(255,0,0,0.35)]">
+            + CREA UTENTE
+        </button>
     </div>
 
-    <!-- Bottom nav -->
-    <nav class="fixed bottom-0 left-0 right-0 bg-[#0a0a0a]/95 backdrop-blur border-t border-white/10 z-20">
-        <div class="max-w-md mx-auto grid h-[72px] text-[10px] {% if user.is_admin %}grid-cols-6{% else %}grid-cols-5{% endif %}">
-            <a href="/discover" class="flex flex-col items-center justify-center text-gray-500 gap-0.5">
-                <span class="text-xl">🔥</span> Scopri
-            </a>
-            <a href="/likes" class="flex flex-col items-center justify-center text-gray-500 gap-0.5">
-                <span class="text-xl">⭐</span> Likes
-            </a>
-            <a href="/chats" class="flex flex-col items-center justify-center text-gray-500 gap-0.5">
-                <span class="text-xl">💬</span> Chat
-            </a>
-            <a href="/matches" class="flex flex-col items-center justify-center text-gray-500 gap-0.5">
-                <span class="text-xl">♥</span> Match
-            </a>
-            {% if user.is_admin %}
-            <a href="/admin" class="flex flex-col items-center justify-center text-red-pure gap-0.5">
-                <span class="text-xl">⚙️</span> Admin
-            </a>
-            {% endif %}
-            <a href="/profile" class="flex flex-col items-center justify-center text-gray-500 gap-0.5">
-                <span class="text-xl">👤</span> Tu
-            </a>
-        </div>
-    </nav>
-
-<!-- Modal GESTISCI utente -->
-<div id="manage-modal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 p-3">
-  <div class="bg-[#121212] border border-white/10 rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl">
-    <div class="sticky top-0 bg-[#121212] border-b border-white/10 px-4 py-3 flex items-center justify-between">
-      <div class="font-hot text-xl tracking-wide"><span class="text-red-pure">⚙️</span> GESTISCI UTENTE</div>
-      <button type="button" onclick="closeManage()" class="text-gray-400 text-xl px-2">✕</button>
+    <!-- Filters -->
+    <div class="flex flex-wrap gap-2 mb-4">
+        <a href="/admin?filter=tutti" class="px-4 py-1.5 rounded-lg text-xs font-semibold {% if not filter or filter == 'tutti' %}bg-[#ff0000] text-white{% else %}bg-white/5 text-gray-400 border border-white/10{% endif %}">TUTTI</a>
+        <a href="/admin?filter=attivi" class="px-4 py-1.5 rounded-lg text-xs font-semibold {% if filter == 'attivi' %}bg-[#ff0000] text-white{% else %}bg-white/5 text-gray-400 border border-white/10{% endif %}">ATTIVI</a>
+        <a href="/admin?filter=sospesi" class="px-4 py-1.5 rounded-lg text-xs font-semibold {% if filter == 'sospesi' %}bg-[#ff0000] text-white{% else %}bg-white/5 text-gray-400 border border-white/10{% endif %}">SOSPESI</a>
+        <a href="/admin?filter=bannati" class="px-4 py-1.5 rounded-lg text-xs font-semibold {% if filter == 'bannati' %}bg-[#ff0000] text-white{% else %}bg-white/5 text-gray-400 border border-white/10{% endif %}">BANNATI</a>
     </div>
-    <form id="manage-form" method="post" action="/admin/user/0/update" class="p-4 space-y-4 text-sm">
-      <input type="hidden" name="user_id_display" id="m-id-label" value="">
 
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="text-[10px] text-gray-500">Nome</label>
-          <input name="nome" id="m-nome" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
-        </div>
-        <div>
-          <label class="text-[10px] text-gray-500">Username</label>
-          <input name="username" id="m-username" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
-        </div>
-      </div>
-      <div>
-        <label class="text-[10px] text-gray-500">Email</label>
-        <input name="email" id="m-email" type="email" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
-      </div>
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="text-[10px] text-gray-500">Città</label>
-          <input name="citta" id="m-citta" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
-        </div>
-        <div>
-          <label class="text-[10px] text-gray-500">Data nascita</label>
-          <input name="data_nascita" id="m-nascita" type="date" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
-        </div>
-      </div>
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="text-[10px] text-gray-500">Genere</label>
-          <input name="genere" id="m-genere" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
-        </div>
-        <div>
-          <label class="text-[10px] text-gray-500">Orientamento</label>
-          <input name="orientamento" id="m-orientamento" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
-        </div>
-      </div>
-      <div>
-        <label class="text-[10px] text-gray-500">Bio</label>
-        <textarea name="bio" id="m-bio" rows="2" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white"></textarea>
-      </div>
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="text-[10px] text-gray-500">Crediti</label>
-          <input name="credits" id="m-credits" type="number" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
-        </div>
-        <div>
-          <label class="text-[10px] text-gray-500">Ruolo</label>
-          <select name="ruolo" id="m-ruolo" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
-            <option value="user">Utente</option>
-            <option value="mod">Moderatore</option>
-            <option value="admin">Admin</option>
-          </select>
-        </div>
-      </div>
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="text-[10px] text-gray-500">Stato</label>
-          <select name="stato" id="m-stato" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
-            <option value="attivo">Attivo</option>
-            <option value="bannato">Bannato</option>
-          </select>
-        </div>
-        <div>
-          <label class="text-[10px] text-gray-500">Sospeso fino (vuoto = no)</label>
-          <input name="sospeso_fino" id="m-sospeso" type="datetime-local" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white">
-        </div>
-      </div>
-      <div>
-        <label class="text-[10px] text-gray-500">Note admin</label>
-        <textarea name="note_admin" id="m-note" rows="2" class="w-full bg-black/40 border border-white/15 rounded-lg px-3 py-2 text-white"></textarea>
-      </div>
-
-      <div class="border-t border-white/10 pt-3">
-        <div class="font-hot text-base mb-2 text-red-pure">RESTRIZIONI</div>
-        <div class="grid grid-cols-1 gap-2 text-xs text-gray-300">
-          <label class="flex gap-2 items-center"><input type="checkbox" name="no_scopri" id="r-scopri" class="accent-[#ff0000]"> Vietare accesso a Scopri</label>
-          <label class="flex gap-2 items-center"><input type="checkbox" name="no_chat" id="r-chat" class="accent-[#ff0000]"> Vietare accesso Chat / Match</label>
-          <label class="flex gap-2 items-center"><input type="checkbox" name="no_messaggi" id="r-msg" class="accent-[#ff0000]"> Vietare di scrivere messaggi</label>
-          <label class="flex gap-2 items-center"><input type="checkbox" name="no_like" id="r-like" class="accent-[#ff0000]"> Vietare di mettere like</label>
-          <label class="flex gap-2 items-center"><input type="checkbox" name="no_primo_messaggio" id="r-primo" class="accent-[#ff0000]"> Vietare primo messaggio allo swipe</label>
-          <label class="flex gap-2 items-center"><input type="checkbox" name="no_gallery" id="r-gallery" class="accent-[#ff0000]"> Vietare upload Gallery (foto/video)</label>
-          <label class="flex gap-2 items-center"><input type="checkbox" name="no_vedi_foto" id="r-vedi" class="accent-[#ff0000]"> Vietare di vedere foto altrui</label>
-          <label class="flex gap-2 items-center"><input type="checkbox" name="no_commenti" id="r-commenti" class="accent-[#ff0000]"> Vietare commenti</label>
-          <label class="flex gap-2 items-center"><input type="checkbox" name="no_storie" id="r-storie" class="accent-[#ff0000]"> Vietare storie</label>
-        </div>
-      </div>
-
-      <button type="submit" class="w-full bg-[#ff0000] text-white font-semibold py-3 rounded-xl">SALVA MODIFICHE</button>
+    <!-- Search -->
+    <form method="get" action="/admin" class="flex gap-2 mb-6">
+        <input type="hidden" name="filter" value="{{ filter or 'tutti' }}">
+        <input type="text" name="q" value="{{ q or '' }}" placeholder="Cerca per nome, email o città..."
+               class="flex-1 rounded-lg px-4 py-3 text-sm">
+        <button class="bg-[#ff0000] px-5 py-3 rounded-lg font-semibold text-sm">CERCA</button>
     </form>
+
+    <!-- Table -->
+    <div class="overflow-x-auto border border-white/10 rounded-xl">
+        <table class="w-full text-sm text-left">
+            <thead class="text-[11px] text-gray-500 border-b border-white/10">
+                <tr>
+                    <th class="px-4 py-3 font-normal">UTENTE</th>
+                    <th class="px-4 py-3 font-normal">EMAIL</th>
+                    <th class="px-4 py-3 font-normal">STATO</th>
+                    <th class="px-4 py-3 font-normal">RUOLO</th>
+                    <th class="px-4 py-3 font-normal">ETÀ</th>
+                    <th class="px-4 py-3 font-normal">CITTÀ</th>
+                    <th class="px-4 py-3 font-normal">RESTRIZIONI</th>
+                    <th class="px-4 py-3 font-normal">AZIONI</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in users %}
+                <tr class="border-b border-white/5 hover:bg-white/[0.03]">
+                    <td class="px-4 py-3">
+                        <div class="flex items-center gap-2">
+                            <div class="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-xs">👤</div>
+                            <span class="font-semibold">{{ u.nome }}</span>
+                        </div>
+                    </td>
+                    <td class="px-4 py-3 text-gray-400 text-xs">{{ u.email }}</td>
+                    <td class="px-4 py-3">
+                        {% if u.stato == 'bannato' %}
+                        <span class="text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full font-semibold">BANNATO</span>
+                        {% elif u.sospeso_fino %}
+                        <span class="text-[10px] bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded-full font-semibold">SOSPESO</span>
+                        {% else %}
+                        <span class="text-[10px] bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full font-semibold">ATTIVO</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3">
+                        {% if u.is_admin or u.ruolo == 'admin' %}
+                        <span class="text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded font-semibold">ADMIN</span>
+                        {% elif u.is_mod or u.ruolo == 'mod' %}
+                        <span class="text-[10px] bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded font-semibold">MOD</span>
+                        {% else %}
+                        <span class="text-gray-600">—</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-gray-400">{{ u.eta if u.eta else '—' }}</td>
+                    <td class="px-4 py-3 text-gray-400">{{ u.citta or '—' }}</td>
+                    <td class="px-4 py-3 text-gray-500 text-xs">
+                        {% set rc = namespace(n=0) %}
+                        {% if u.restrictions %}
+                          {% for k,v in u.restrictions.items() if v and k.startswith('no_') %}
+                            {% set rc.n = rc.n + 1 %}
+                          {% endfor %}
+                        {% endif %}
+                        {{ rc.n if rc.n else '—' }}
+                    </td>
+                    <td class="px-4 py-3">
+                        <div class="flex gap-2">
+                            <button type="button" onclick="openManage({{ u.id }})"
+                                    class="border border-white/20 text-xs px-3 py-1.5 rounded-lg hover:border-[#ff0000] hover:text-[#ff0000]">
+                                ⚙ GESTISCI
+                            </button>
+                            {% if not u.is_admin %}
+                            <form method="post" action="/admin/delete/{{ u.id }}" onsubmit="return confirm('Eliminare {{ u.nome }}?')">
+                                <button class="border border-white/10 text-gray-500 text-xs px-2 py-1.5 rounded-lg hover:text-red-400">🗑</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8" class="px-4 py-10 text-center text-gray-500">Nessun utente</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ===================== MODAL GESTISCI ===================== -->
+<div id="manage-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-3">
+  <div class="bg-[#0a0a0a] border border-white/10 rounded-2xl w-full max-w-md max-h-[94vh] overflow-hidden flex flex-col shadow-[0_0_40px_rgba(255,0,0,0.15)]">
+
+    <!-- Header -->
+    <div class="px-4 pt-4 pb-2 flex items-start justify-between border-b border-white/10">
+      <div class="flex items-center gap-3">
+        <div class="w-11 h-11 rounded-full bg-white/10 flex items-center justify-center text-lg">👤</div>
+        <div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-hot text-xl" id="hdr-nome">—</span>
+            <span id="hdr-stato" class="text-[10px] bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full font-semibold">ATTIVO</span>
+            <span id="hdr-ruolo" class="text-[10px] text-gray-400 uppercase">USER</span>
+          </div>
+          <div class="text-xs text-gray-500" id="hdr-email">—</div>
+        </div>
+      </div>
+      <button type="button" onclick="closeManage()" class="text-gray-400 text-xl leading-none px-1">✕</button>
+    </div>
+
+    <!-- Tabs -->
+    <div class="flex text-xs font-semibold tracking-wide border-b border-white/10">
+      <button type="button" class="tab-btn tab-active flex-1 py-3" data-tab="profilo" onclick="switchTab('profilo')">PROFILO</button>
+      <button type="button" class="tab-btn flex-1 py-3 text-gray-500" data-tab="accesso" onclick="switchTab('accesso')">ACCESSO</button>
+      <button type="button" class="tab-btn flex-1 py-3 text-gray-500" data-tab="restrizioni" onclick="switchTab('restrizioni')">RESTRIZIONI</button>
+      <button type="button" class="tab-btn flex-1 py-3 text-gray-500" data-tab="ruolo" onclick="switchTab('ruolo')">RUOLO</button>
+    </div>
+
+    <div class="overflow-y-auto flex-1">
+      <!-- TAB PROFILO -->
+      <form id="form-profilo" method="post" class="p-4 space-y-3 hidden" data-panel="profilo">
+        <input type="hidden" name="_tab" value="profilo">
+        <div>
+          <label class="text-[10px] text-gray-500 tracking-wider">NOME</label>
+          <input name="nome" id="m-nome" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
+        </div>
+        <div>
+          <label class="text-[10px] text-gray-500 tracking-wider">EMAIL</label>
+          <input name="email" id="m-email" type="email" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="text-[10px] text-gray-500 tracking-wider">ETÀ</label>
+            <input name="eta_display" id="m-eta" type="number" min="18" max="99" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1" placeholder="—">
+          </div>
+          <div>
+            <label class="text-[10px] text-gray-500 tracking-wider">GENERE</label>
+            <select name="genere" id="m-genere" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
+              <option value="">—</option>
+              <option value="uomo">Uomo</option>
+              <option value="donna">Donna</option>
+              <option value="altro">Altro</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="text-[10px] text-gray-500 tracking-wider">CITTÀ</label>
+          <input name="citta" id="m-citta" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
+        </div>
+        <div>
+          <label class="text-[10px] text-gray-500 tracking-wider">NUMERO DI TELEFONO</label>
+          <input name="telefono" id="m-telefono" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
+        </div>
+        <div>
+          <label class="text-[10px] text-gray-500 tracking-wider">INCANTESIMI</label>
+          <input name="credits" id="m-credits" type="number" class="w-full rounded-lg px-3 py-2.5 text-sm mt-1">
+        </div>
+        <p class="text-[10px] text-gray-600 pt-1">ID: <span id="m-id">—</span> · Registrato: <span id="m-reg">—</span></p>
+        <button type="submit" class="w-full bg-[#ff0000] text-white font-semibold py-3.5 rounded-xl mt-2 shadow-[0_0_24px_rgba(255,0,0,0.35)]">
+          💾 SALVA PROFILO
+        </button>
+      </form>
+
+      <!-- TAB ACCESSO -->
+      <div class="p-4 space-y-3 hidden" data-panel="accesso">
+        <div class="border border-white/10 rounded-xl p-4">
+          <div class="text-[10px] text-gray-500 tracking-wider mb-2">STATO ATTUALE</div>
+          <span id="acc-stato" class="text-[11px] bg-green-500/20 text-green-400 px-2.5 py-1 rounded-full font-semibold">ATTIVO</span>
+        </div>
+        <button type="button" onclick="showSuspend()" class="w-full flex items-center justify-between border border-yellow-600/40 bg-yellow-500/5 text-yellow-400 rounded-xl px-4 py-3.5 text-sm font-semibold">
+          <span>⏱ Sospendi temporaneamente</span><span>›</span>
+        </button>
+        <div id="suspend-box" class="hidden border border-yellow-600/30 rounded-xl p-3 space-y-2">
+          <label class="text-[10px] text-gray-500">Sospeso fino a</label>
+          <input type="datetime-local" id="m-sospeso" class="w-full rounded-lg px-3 py-2 text-sm">
+          <button type="button" onclick="saveAccess('sospendi')" class="w-full bg-yellow-600 text-black font-semibold py-2 rounded-lg text-sm">Conferma sospensione</button>
+          <button type="button" onclick="saveAccess('riattiva')" class="w-full bg-white/10 text-white py-2 rounded-lg text-sm">Togli sospensione</button>
+        </div>
+        <button type="button" onclick="saveAccess('ban')" class="w-full flex items-center justify-between border border-red-600/40 bg-red-500/5 text-red-400 rounded-xl px-4 py-3.5 text-sm font-semibold">
+          <span>🚫 Ban definitivo</span><span>›</span>
+        </button>
+        <button type="button" onclick="saveAccess('unban')" class="w-full flex items-center justify-between border border-green-600/30 bg-green-500/5 text-green-400 rounded-xl px-4 py-3.5 text-sm font-semibold">
+          <span>✓ Sbanna / riattiva</span><span>›</span>
+        </button>
+      </div>
+
+      <!-- TAB RESTRIZIONI -->
+      <form id="form-restrizioni" method="post" class="p-4 space-y-3 hidden" data-panel="restrizioni">
+        <p class="text-xs text-gray-500 mb-2">Disabilita singole funzionalità. L'account resta attivo ma non può eseguire le azioni bloccate.</p>
+
+        <div class="text-[10px] text-gray-500 tracking-wider mb-1">SOCIAL & CONTENUTI</div>
+        <div class="border border-white/10 rounded-xl divide-y divide-white/5 mb-3">
+          <label class="flex items-center gap-3 px-4 py-3 text-sm"><input type="checkbox" name="no_post" id="r-post" class="accent-[#ff0000]"> Pubblicare post</label>
+          <label class="flex items-center gap-3 px-4 py-3 text-sm"><input type="checkbox" name="no_commenti" id="r-commenti" class="accent-[#ff0000]"> Commentare</label>
+          <label class="flex items-center gap-3 px-4 py-3 text-sm"><input type="checkbox" name="no_like" id="r-like" class="accent-[#ff0000]"> Mettere like</label>
+          <label class="flex items-center gap-3 px-4 py-3 text-sm"><input type="checkbox" name="no_storie" id="r-storie" class="accent-[#ff0000]"> Pubblicare storie</label>
+          <label class="flex items-center gap-3 px-4 py-3 text-sm"><input type="checkbox" name="no_gallery" id="r-gallery" class="accent-[#ff0000]"> Caricare foto in galleria</label>
+        </div>
+
+        <div class="text-[10px] text-gray-500 tracking-wider mb-1">CHAT & MATCH</div>
+        <div class="border border-white/10 rounded-xl divide-y divide-white/5 mb-3">
+          <label class="flex items-center gap-3 px-4 py-3 text-sm"><input type="checkbox" name="no_messaggi" id="r-msg" class="accent-[#ff0000]"> Inviare messaggi in chat</label>
+          <label class="flex items-center gap-3 px-4 py-3 text-sm"><input type="checkbox" name="no_scopri" id="r-scopri" class="accent-[#ff0000]"> Fare match / swipe</label>
+          <label class="flex items-center gap-3 px-4 py-3 text-sm"><input type="checkbox" name="no_primo_messaggio" id="r-primo" class="accent-[#ff0000]"> Primo messaggio allo swipe</label>
+          <label class="flex items-center gap-3 px-4 py-3 text-sm"><input type="checkbox" name="no_chat" id="r-chat" class="accent-[#ff0000]"> Accesso a chat</label>
+          <label class="flex items-center gap-3 px-4 py-3 text-sm"><input type="checkbox" name="no_vedi_foto" id="r-vedi" class="accent-[#ff0000]"> Vedere foto private</label>
+        </div>
+
+        <div class="text-[10px] text-gray-500 tracking-wider mb-1">DONI</div>
+        <div class="border border-white/10 rounded-xl divide-y divide-white/5 mb-3">
+          <label class="flex items-center gap-3 px-4 py-3 text-sm"><input type="checkbox" name="no_doni" id="r-doni" class="accent-[#ff0000]"> Inviare doni agli utenti</label>
+        </div>
+
+        <div class="text-[10px] text-gray-500 tracking-wider mb-1">SEZIONE ANNUNCI</div>
+        <div class="border border-white/10 rounded-xl divide-y divide-white/5 mb-3">
+          <label class="flex items-center gap-3 px-4 py-3 text-sm"><input type="checkbox" name="no_annunci" id="r-annunci" class="accent-[#ff0000]"> Accesso completo agli Annunci</label>
+          <label class="flex items-center gap-3 px-4 py-3 text-sm"><input type="checkbox" name="no_annunci_personali" id="r-ann-pers" class="accent-[#ff0000]"> Annunci Personali (amicizia / amore / hot)</label>
+          <label class="flex items-center gap-3 px-4 py-3 text-sm"><input type="checkbox" name="no_annunci_hot" id="r-ann-hot" class="accent-[#ff0000]"> Annunci HOT (contenuti per adulti)</label>
+          <label class="flex items-center gap-3 px-4 py-3 text-sm"><input type="checkbox" name="no_annunci_vendita" id="r-ann-vend" class="accent-[#ff0000]"> Annunci in Vendita</label>
+          <label class="flex items-center gap-3 px-4 py-3 text-sm"><input type="checkbox" name="no_annunci_scambio" id="r-ann-scamb" class="accent-[#ff0000]"> Annunci Scambio</label>
+          <label class="flex items-center gap-3 px-4 py-3 text-sm"><input type="checkbox" name="no_annunci_regalo" id="r-ann-reg" class="accent-[#ff0000]"> Annunci in Regalo</label>
+        </div>
+
+        <button type="submit" class="w-full bg-[#ff0000] text-white font-semibold py-3.5 rounded-xl shadow-[0_0_24px_rgba(255,0,0,0.35)]">
+          💾 SALVA RESTRIZIONI
+        </button>
+      </form>
+
+      <!-- TAB RUOLO -->
+      <div class="p-4 space-y-3 hidden" data-panel="ruolo">
+        <p class="text-xs text-gray-500 mb-2">Seleziona il ruolo da assegnare a questo utente.</p>
+        <label class="block border border-white/10 rounded-xl p-4 cursor-pointer hover:border-white/30 role-opt" data-role="user">
+          <div class="flex items-center gap-2 font-semibold text-sm mb-1">👤 UTENTE</div>
+          <p class="text-xs text-gray-500">Accesso standard all'app. Nessun privilegio speciale.</p>
+          <input type="radio" name="ruolo_radio" value="user" class="hidden" id="role-user">
+        </label>
+        <label class="block border border-yellow-600/30 rounded-xl p-4 cursor-pointer hover:border-yellow-500/50 role-opt" data-role="mod">
+          <div class="flex items-center gap-2 font-semibold text-sm text-yellow-400 mb-1">🛡 MODERATORE</div>
+          <p class="text-xs text-gray-500">Vede e gestisce contenuti, sospende utenti temporaneamente, imposta restrizioni. Non può bannare definitivamente né cambiare ruoli.</p>
+          <input type="radio" name="ruolo_radio" value="mod" class="hidden" id="role-mod">
+        </label>
+        <label class="block border border-red-600/30 rounded-xl p-4 cursor-pointer hover:border-red-500/50 role-opt" data-role="admin">
+          <div class="flex items-center gap-2 font-semibold text-sm text-red-400 mb-1">🔴 AMMINISTRATORE</div>
+          <p class="text-xs text-gray-500">Accesso completo: ban permanente, creazione utenti, modifica ruoli, gestione totale.</p>
+          <input type="radio" name="ruolo_radio" value="admin" class="hidden" id="role-admin">
+        </label>
+        <button type="button" onclick="saveRole()" class="w-full bg-[#ff0000] text-white font-semibold py-3.5 rounded-xl shadow-[0_0_24px_rgba(255,0,0,0.35)]">
+          🛡 IMPOSTA RUOLO
+        </button>
+      </div>
+    </div>
   </div>
 </div>
 
 <script>
+let currentUserId = null;
+let selectedRole = 'user';
+
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.toggle('tab-active', b.dataset.tab === name);
+    b.classList.toggle('text-gray-500', b.dataset.tab !== name);
+  });
+  document.querySelectorAll('[data-panel]').forEach(p => {
+    p.classList.toggle('hidden', p.dataset.panel !== name);
+  });
+}
+
+function showSuspend() {
+  document.getElementById('suspend-box').classList.toggle('hidden');
+}
+
 async function openManage(id) {
-  const modal = document.getElementById('manage-modal');
-  const form = document.getElementById('manage-form');
-  form.action = '/admin/user/' + id + '/update';
-  modal.classList.remove('hidden');
+  currentUserId = id;
+  document.getElementById('manage-modal').classList.remove('hidden');
+  switchTab('profilo');
+  document.getElementById('form-profilo').action = '/admin/user/' + id + '/update';
+  document.getElementById('form-restrizioni').action = '/admin/user/' + id + '/update';
   try {
     const res = await fetch('/admin/user/' + id);
     const data = await res.json();
     if (!data.ok) { alert('Utente non trovato'); return; }
     const u = data.user;
     const r = u.restrictions || {};
+    document.getElementById('hdr-nome').textContent = u.nome || '—';
+    document.getElementById('hdr-email').textContent = u.email || '—';
     document.getElementById('m-nome').value = u.nome || '';
-    document.getElementById('m-username').value = u.username || '';
     document.getElementById('m-email').value = u.email || '';
     document.getElementById('m-citta').value = u.citta || '';
-    document.getElementById('m-bio').value = u.bio || '';
     document.getElementById('m-genere').value = u.genere || '';
-    document.getElementById('m-orientamento').value = u.orientamento || '';
     document.getElementById('m-credits').value = u.credits ?? 0;
-    document.getElementById('m-note').value = u.note_admin || '';
-    document.getElementById('m-ruolo').value = u.ruolo || (u.is_admin ? 'admin' : (u.is_mod ? 'mod' : 'user'));
-    document.getElementById('m-stato').value = u.stato || 'attivo';
+    document.getElementById('m-telefono').value = u.telefono || '';
+    document.getElementById('m-id').textContent = u.id;
+    document.getElementById('m-reg').textContent = (u.created_at || u.data_registrazione || '—').toString().slice(0,10);
+    // età approx
     if (u.data_nascita) {
-      document.getElementById('m-nascita').value = String(u.data_nascita).slice(0, 10);
-    } else {
-      document.getElementById('m-nascita').value = '';
-    }
+      const y = new Date().getFullYear() - parseInt(String(u.data_nascita).slice(0,4));
+      document.getElementById('m-eta').value = y > 0 && y < 120 ? y : '';
+    } else document.getElementById('m-eta').value = '';
+
+    let stato = 'ATTIVO', statoClass = 'bg-green-500/20 text-green-400';
+    if (u.stato === 'bannato') { stato = 'BANNATO'; statoClass = 'bg-red-500/20 text-red-400'; }
+    else if (u.sospeso_fino) { stato = 'SOSPESO'; statoClass = 'bg-yellow-500/20 text-yellow-400'; }
+    const stEl = document.getElementById('hdr-stato');
+    stEl.textContent = stato; stEl.className = 'text-[10px] px-2 py-0.5 rounded-full font-semibold ' + statoClass;
+    document.getElementById('acc-stato').textContent = stato;
+    document.getElementById('acc-stato').className = 'text-[11px] px-2.5 py-1 rounded-full font-semibold ' + statoClass;
+
+    const ruolo = u.ruolo || (u.is_admin ? 'admin' : (u.is_mod ? 'mod' : 'user'));
+    document.getElementById('hdr-ruolo').textContent = ruolo === 'admin' ? 'ADMIN' : (ruolo === 'mod' ? 'MOD' : 'USER');
+    selectedRole = ruolo;
+    document.querySelectorAll('.role-opt').forEach(el => {
+      el.classList.toggle('ring-1', el.dataset.role === ruolo);
+      el.classList.toggle('ring-red-500', el.dataset.role === ruolo && ruolo === 'admin');
+      el.classList.toggle('ring-yellow-500', el.dataset.role === ruolo && ruolo === 'mod');
+      el.classList.toggle('ring-white/30', el.dataset.role === ruolo && ruolo === 'user');
+    });
+
     if (u.sospeso_fino) {
-      let s = String(u.sospeso_fino).replace(' ', 'T').slice(0, 16);
-      document.getElementById('m-sospeso').value = s;
-    } else {
-      document.getElementById('m-sospeso').value = '';
-    }
-    document.getElementById('r-scopri').checked = !!r.no_scopri;
-    document.getElementById('r-chat').checked = !!r.no_chat;
-    document.getElementById('r-msg').checked = !!r.no_messaggi;
-    document.getElementById('r-like').checked = !!r.no_like;
-    document.getElementById('r-primo').checked = !!r.no_primo_messaggio;
-    document.getElementById('r-gallery').checked = !!r.no_gallery;
-    document.getElementById('r-vedi').checked = !!r.no_vedi_foto;
-    document.getElementById('r-commenti').checked = !!r.no_commenti;
-    document.getElementById('r-storie').checked = !!r.no_storie;
-  } catch (e) {
-    alert('Errore caricamento utente');
-  }
+      document.getElementById('m-sospeso').value = String(u.sospeso_fino).replace(' ','T').slice(0,16);
+    } else document.getElementById('m-sospeso').value = '';
+
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.checked = !!v; };
+    set('r-like', r.no_like); set('r-commenti', r.no_commenti); set('r-storie', r.no_storie);
+    set('r-gallery', r.no_gallery); set('r-msg', r.no_messaggi); set('r-scopri', r.no_scopri);
+    set('r-primo', r.no_primo_messaggio); set('r-chat', r.no_chat); set('r-vedi', r.no_vedi_foto);
+    set('r-post', r.no_post); set('r-doni', r.no_doni);
+    set('r-annunci', r.no_annunci); set('r-ann-pers', r.no_annunci_personali);
+    set('r-ann-hot', r.no_annunci_hot); set('r-ann-vend', r.no_annunci_vendita);
+    set('r-ann-scamb', r.no_annunci_scambio); set('r-ann-reg', r.no_annunci_regalo);
+  } catch(e) { alert('Errore caricamento'); }
 }
+
 function closeManage() {
   document.getElementById('manage-modal').classList.add('hidden');
+  currentUserId = null;
 }
-document.getElementById('manage-modal')?.addEventListener('click', function(e) {
+
+document.querySelectorAll('.role-opt').forEach(el => {
+  el.addEventListener('click', () => {
+    selectedRole = el.dataset.role;
+    document.querySelectorAll('.role-opt').forEach(x => x.classList.remove('ring-1','ring-red-500','ring-yellow-500','ring-white/30'));
+    el.classList.add('ring-1');
+    if (selectedRole === 'admin') el.classList.add('ring-red-500');
+    else if (selectedRole === 'mod') el.classList.add('ring-yellow-500');
+    else el.classList.add('ring-white/30');
+  });
+});
+
+function saveRole() {
+  if (!currentUserId) return;
+  const f = document.createElement('form');
+  f.method = 'POST';
+  f.action = '/admin/user/' + currentUserId + '/update';
+  const add = (n,v) => { const i = document.createElement('input'); i.name=n; i.value=v; f.appendChild(i); };
+  add('ruolo', selectedRole);
+  add('_only', 'ruolo');
+  document.body.appendChild(f); f.submit();
+}
+
+function saveAccess(action) {
+  if (!currentUserId) return;
+  const f = document.createElement('form');
+  f.method = 'POST';
+  f.action = '/admin/user/' + currentUserId + '/update';
+  const add = (n,v) => { const i = document.createElement('input'); i.name=n; i.value=v; f.appendChild(i); };
+  add('_only', 'accesso');
+  add('accesso_action', action);
+  if (action === 'sospendi') add('sospeso_fino', document.getElementById('m-sospeso').value || '');
+  document.body.appendChild(f); f.submit();
+}
+
+document.getElementById('form-profilo').addEventListener('submit', function() {
+  // ensure action set
+  this.action = '/admin/user/' + currentUserId + '/update';
+  const i = document.createElement('input'); i.type='hidden'; i.name='_only'; i.value='profilo'; this.appendChild(i);
+});
+document.getElementById('form-restrizioni').addEventListener('submit', function() {
+  this.action = '/admin/user/' + currentUserId + '/update';
+  const i = document.createElement('input'); i.type='hidden'; i.name='_only'; i.value='restrizioni'; this.appendChild(i);
+});
+
+document.getElementById('manage-modal').addEventListener('click', function(e) {
   if (e.target === this) closeManage();
 });
 </script>
-
 </body>
 </html>

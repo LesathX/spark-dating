@@ -976,6 +976,7 @@ async def admin_panel(req: Request):
 
     tab = req.query_params.get("tab") or "users"
     q = (req.query_params.get("q") or "").strip()
+    filter_stato = req.query_params.get("filter") or "tutti"
 
     c = db()
     cur = c.cursor()
@@ -1024,6 +1025,16 @@ async def admin_panel(req: Request):
         for u in users:
             u["restrictions"] = get_restrictions(u["id"])
             u["sospeso"] = bool(u.get("sospeso_fino"))
+            try:
+                u["eta"] = eta(u.get("data_nascita"))
+            except Exception:
+                u["eta"] = None
+        if filter_stato == "attivi":
+            users = [u for u in users if u.get("stato") == "attivo" and not u.get("sospeso_fino")]
+        elif filter_stato == "bannati":
+            users = [u for u in users if u.get("stato") == "bannato"]
+        elif filter_stato == "sospesi":
+            users = [u for u in users if u.get("sospeso_fino") and u.get("stato") != "bannato"]
 
     conversations = []
     open_conversation = None
@@ -1101,6 +1112,7 @@ async def admin_panel(req: Request):
         "user": user,
         "tab": tab,
         "q": q,
+        "filter": filter_stato if "filter_stato" in dir() else "tutti",
         "stats": {
             "users": users_count,
             "matches": matches_count,
@@ -1735,6 +1747,248 @@ async def spells_cast(req: Request, spell: str = Form(...)):
             pass
         return RedirectResponse("/spells?ok=boost", 303)
     return RedirectResponse("/spells", 303)
+
+
+@app.post("/admin/credits/{user_id}")
+async def admin_credits(req: Request, user_id: int, amount: int = Form(...)):
+    if not require_admin(req):
+        return RedirectResponse("/login", 303)
+    add_credits(user_id, amount, "admin_ricarica")
+    return RedirectResponse("/admin", 303)
+
+
+@app.post("/admin/make_mod/{user_id}")
+async def admin_make_mod(req: Request, user_id: int):
+    if not require_admin(req):
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    cur.execute("UPDATE users SET is_mod=1, ruolo='mod' WHERE id=%s AND COALESCE(is_admin,0)=0", (user_id,))
+    c.commit()
+    cur.close()
+    c.close()
+    return RedirectResponse("/admin", 303)
+
+
+@app.post("/admin/remove_mod/{user_id}")
+async def admin_remove_mod(req: Request, user_id: int):
+    if not require_admin(req):
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    cur.execute("UPDATE users SET is_mod=0, ruolo='user' WHERE id=%s", (user_id,))
+    c.commit()
+    cur.close()
+    c.close()
+    return RedirectResponse("/admin", 303)
+
+
+# ============== BACKUP ==============
+@app.get("/admin/backup")
+async def admin_backup(req: Request):
+    import json
+    from fastapi.responses import Response
+    admin = require_admin(req)
+    if not admin:
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    data = {}
+    for table in ("users", "matches", "messages", "conversations", "swipes", "notifications", "user_photos", "credit_transactions"):
+        try:
+            cur.execute(f"SELECT * FROM {table}")
+            rows = cur.fetchall()
+            data[table] = []
+            for r in rows:
+                d = dict(r)
+                for k, v in list(d.items()):
+                    if hasattr(v, "isoformat"):
+                        d[k] = v.isoformat()
+                # non esportare password hash in chiaro oltre il necessario - le includiamo per restore
+                data[table].append(d)
+        except Exception as e:
+            data[table] = {"error": str(e)}
+    try:
+        cur.execute(
+            "INSERT INTO backups_log (tipo, note, created_by) VALUES ('manual', 'backup manuale admin', %s)",
+            (admin["id"],),
+        )
+        c.commit()
+    except Exception:
+        c.rollback()
+    cur.close()
+    c.close()
+    payload = json.dumps(data, ensure_ascii=False, indent=2)
+    return Response(
+        content=payload,
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=mycheating_backup.json"},
+    )
+
+
+@app.get("/admin/backup/auto")
+async def admin_backup_auto(req: Request):
+    """Endpoint per cron giornaliero. Usa header X-Backup-Secret o query secret."""
+    import json
+    from datetime import datetime
+    secret = req.query_params.get("secret") or req.headers.get("X-Backup-Secret")
+    expected = os.environ.get("BACKUP_SECRET", "mycheating_backup_secret_2026")
+    if secret != expected:
+        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    c = db()
+    cur = c.cursor()
+    data = {"created_at": datetime.utcnow().isoformat(), "tipo": "auto"}
+    for table in ("users", "matches", "messages", "conversations", "swipes"):
+        try:
+            cur.execute(f"SELECT * FROM {table}")
+            rows = []
+            for r in cur.fetchall():
+                d = dict(r)
+                for k, v in list(d.items()):
+                    if hasattr(v, "isoformat"):
+                        d[k] = v.isoformat()
+                rows.append(d)
+            data[table] = rows
+        except Exception as e:
+            data[table] = []
+    try:
+        cur.execute("INSERT INTO backups_log (tipo, note) VALUES ('auto', 'backup automatico giornaliero')")
+        c.commit()
+    except Exception:
+        c.rollback()
+    cur.close()
+    c.close()
+    # salva su filesystem se possibile
+    try:
+        backup_dir = BASE_DIR / "backups"
+        backup_dir.mkdir(exist_ok=True)
+        fname = backup_dir / f"auto_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
+        fname.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    except Exception as e:
+        print("auto backup write:", e)
+    return JSONResponse({"ok": True, "tables": list(data.keys())})
+
+
+
+@app.get("/admin/user/{user_id}")
+async def admin_user_get(req: Request, user_id: int):
+    if not require_admin(req):
+        return JSONResponse({"ok": False}, status_code=401)
+    c = db()
+    cur = c.cursor()
+    cur.execute("SELECT * FROM users WHERE id=%s", (user_id,))
+    u = cur.fetchone()
+    cur.close()
+    c.close()
+    if not u:
+        return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+    d = dict(u)
+    for k, v in list(d.items()):
+        if hasattr(v, "isoformat"):
+            d[k] = v.isoformat()
+    d.pop("password_hash", None)
+    d["restrictions"] = get_restrictions(user_id)
+    return JSONResponse({"ok": True, "user": d})
+
+
+
+@app.post("/admin/user/{user_id}/update")
+async def admin_user_update(req: Request, user_id: int):
+    admin = require_admin(req)
+    if not admin:
+        return RedirectResponse("/login", 303)
+    form = await req.form()
+    only = form.get("_only") or "all"
+
+    c = db()
+    cur = c.cursor()
+    try:
+        if only in ("profilo", "all"):
+            nome = form.get("nome")
+            email = form.get("email")
+            citta = form.get("citta")
+            genere = form.get("genere")
+            credits = form.get("credits")
+            telefono = form.get("telefono")
+            sets = []
+            vals = []
+            if nome is not None:
+                sets.append("nome=%s"); vals.append(nome)
+            if email is not None:
+                sets.append("email=%s"); vals.append(email)
+            if citta is not None:
+                sets.append("citta=%s"); vals.append(citta or None)
+            if genere is not None:
+                sets.append("genere=%s"); vals.append(genere or None)
+            if credits not in (None, ""):
+                sets.append("credits=%s"); vals.append(int(credits))
+            try:
+                if telefono is not None:
+                    sets.append("telefono=%s"); vals.append(telefono or None)
+            except Exception:
+                pass
+            if sets:
+                vals.append(user_id)
+                cur.execute("UPDATE users SET " + ", ".join(sets) + " WHERE id=%s", tuple(vals))
+
+        if only in ("accesso", "all"):
+            action = form.get("accesso_action")
+            if action == "ban":
+                cur.execute("UPDATE users SET stato='bannato', is_online=0, sospeso_fino=NULL WHERE id=%s AND COALESCE(is_admin,0)=0", (user_id,))
+            elif action == "unban":
+                cur.execute("UPDATE users SET stato='attivo', sospeso_fino=NULL WHERE id=%s", (user_id,))
+            elif action == "sospendi":
+                fino = form.get("sospeso_fino") or None
+                if fino:
+                    cur.execute("UPDATE users SET sospeso_fino=%s WHERE id=%s AND COALESCE(is_admin,0)=0", (fino, user_id))
+            elif action == "riattiva":
+                cur.execute("UPDATE users SET sospeso_fino=NULL, stato='attivo' WHERE id=%s", (user_id,))
+
+        if only in ("ruolo", "all"):
+            ruolo = form.get("ruolo") or "user"
+            is_admin = 1 if ruolo == "admin" else 0
+            is_mod = 1 if ruolo == "mod" else 0
+            cur.execute("UPDATE users SET ruolo=%s, is_admin=%s, is_mod=%s WHERE id=%s", (ruolo, is_admin, is_mod, user_id))
+
+        if only in ("restrizioni", "all"):
+            flags = [
+                "no_gallery", "no_like", "no_messaggi", "no_primo_messaggio",
+                "no_scopri", "no_chat", "no_vedi_foto", "no_commenti", "no_storie",
+                "no_post", "no_doni", "no_annunci", "no_annunci_personali",
+                "no_annunci_hot", "no_annunci_vendita", "no_annunci_scambio", "no_annunci_regalo",
+            ]
+            restr = {f: 1 if form.get(f) else 0 for f in flags}
+            # try full insert; fallback minimal columns
+            try:
+                cur.execute(
+                    """INSERT INTO user_restrictions (
+                        user_id, no_gallery, no_like, no_messaggi, no_primo_messaggio,
+                        no_scopri, no_chat, no_vedi_foto, no_commenti, no_storie, updated_at
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,CURRENT_TIMESTAMP)
+                    ON CONFLICT (user_id) DO UPDATE SET
+                        no_gallery=EXCLUDED.no_gallery, no_like=EXCLUDED.no_like,
+                        no_messaggi=EXCLUDED.no_messaggi, no_primo_messaggio=EXCLUDED.no_primo_messaggio,
+                        no_scopri=EXCLUDED.no_scopri, no_chat=EXCLUDED.no_chat,
+                        no_vedi_foto=EXCLUDED.no_vedi_foto, no_commenti=EXCLUDED.no_commenti,
+                        no_storie=EXCLUDED.no_storie, updated_at=CURRENT_TIMESTAMP
+                    """,
+                    (
+                        user_id, restr["no_gallery"], restr["no_like"], restr["no_messaggi"],
+                        restr["no_primo_messaggio"], restr["no_scopri"], restr["no_chat"],
+                        restr["no_vedi_foto"], restr["no_commenti"], restr["no_storie"],
+                    ),
+                )
+            except Exception as e:
+                print("restr save:", e)
+
+        c.commit()
+    except Exception as e:
+        c.rollback()
+        print("admin_user_update:", e)
+    finally:
+        cur.close()
+        c.close()
+    return RedirectResponse("/admin?managed=" + str(user_id), 303)
 
 
 @app.post("/admin/credits/{user_id}")

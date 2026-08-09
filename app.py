@@ -585,6 +585,22 @@ async def swipe(req: Request, to_user_id: int = Form(...), tipo: str = Form(...)
     match_created = False
     try:
         cur.execute("INSERT INTO swipes (from_user_id,to_user_id,tipo) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING", (user["id"], to_user_id, tipo))
+        # notifica like (related_id = chi ha messo like)
+        if tipo in ("like", "superlike"):
+            try:
+                cur.execute(
+                    """INSERT INTO notifications (user_id, tipo, titolo, contenuto, related_id)
+                       VALUES (%s, %s, %s, %s, %s)""",
+                    (
+                        to_user_id,
+                        "like" if tipo == "like" else "superlike",
+                        "Nuovo like!" if tipo == "like" else "Super Like!",
+                        f"{user.get('nome') or user.get('username') or 'Qualcuno'} ha messo like al tuo profilo",
+                        user["id"],  # related = from_user_id
+                    ),
+                )
+            except Exception as e:
+                print("like notif:", e)
         if tipo in ("like", "superlike"):
             cur.execute("SELECT id FROM swipes WHERE from_user_id=%s AND to_user_id=%s AND tipo IN ('like','superlike')", (to_user_id, user["id"]))
             if cur.fetchone():
@@ -968,7 +984,13 @@ async def send_message(req: Request, conversation_id: int, contenuto: str = Form
     cur.execute("INSERT INTO messages (conversation_id,sender_id,tipo,contenuto) VALUES (%s,%s,'testo',%s)", (conversation_id, user["id"], contenuto))
     cur.execute("UPDATE conversations SET ultimo_messaggio_at=CURRENT_TIMESTAMP WHERE id=%s", (conversation_id,))
     altro_id = conv["user2_id"] if user["id"] == conv["user1_id"] else conv["user1_id"]
-    cur.execute("INSERT INTO notifications (user_id,tipo,titolo,contenuto,related_id) VALUES (%s,'nuovo_messaggio','Nuovo messaggio',%s,%s)", (altro_id, contenuto[:80], conversation_id))
+    try:
+        cur.execute(
+            "INSERT INTO notifications (user_id,tipo,titolo,contenuto,related_id) VALUES (%s,'nuovo_messaggio',%s,%s,%s)",
+            (altro_id, f"Messaggio da {user.get('nome') or 'utente'}", (contenuto or '')[:80], conversation_id),
+        )
+    except Exception as e:
+        print("msg notif:", e)
     c.commit()
     cur.close()
     c.close()
@@ -1112,99 +1134,155 @@ async def public_profile(req: Request, user_id: int):
 
 @app.get("/notifications/{notif_id}/open")
 async def notification_open(req: Request, notif_id: int):
-    """Apre il profilo di chi ha generato la notifica (o chat se messaggio)."""
+    """
+    Click notifica:
+    - messaggio  → chat
+    - match      → profilo dell'altro
+    - dono       → profilo mittente
+    - like       → profilo di chi ha messo like
+    - foto       → chat
+    """
     user = current_user(req)
     if not user:
         return RedirectResponse("/login", 303)
-    c = db()
-    cur = c.cursor()
+
+    def go_profile(uid):
+        if uid and int(uid) != int(user["id"]):
+            return RedirectResponse(f"/u/{int(uid)}", 303)
+        return RedirectResponse("/notifications", 303)
+
+    def go_chat(cid):
+        if cid:
+            return RedirectResponse(f"/chat/{int(cid)}", 303)
+        return RedirectResponse("/chats", 303)
+
+    c = None
+    cur = None
     try:
+        c = db()
+        cur = c.cursor()
         cur.execute(
             "SELECT * FROM notifications WHERE id=%s AND user_id=%s",
             (notif_id, user["id"]),
         )
-        n = cur.fetchone()
-        if not n:
-            cur.close()
-            c.close()
+        row = cur.fetchone()
+        if not row:
             return RedirectResponse("/notifications", 303)
-        n = dict(n)
+        n = dict(row)
         try:
             cur.execute("UPDATE notifications SET letto=1 WHERE id=%s", (notif_id,))
             c.commit()
         except Exception:
-            c.rollback()
+            try:
+                c.rollback()
+            except Exception:
+                pass
 
-        tipo = (n.get("tipo") or "").lower()
+        tipo = (n.get("tipo") or "").strip().lower()
         related = n.get("related_id")
-        target_user = None
+        from_uid = n.get("from_user_id")  # se colonna esiste
 
-        if tipo in ("nuovo_messaggio", "messaggio", "chat"):
-            # related = conversation_id → vai in chat
+        # --- MESSAGGIO → chat (related = conversation_id) ---
+        if tipo in ("nuovo_messaggio", "messaggio", "chat", "message"):
             if related:
-                cur.close()
-                c.close()
-                return RedirectResponse(f"/chat/{related}", 303)
+                # verifica che sia conversazione valida, altrimenti profilo altro
+                try:
+                    cur.execute(
+                        """SELECT c.id, m.user1_id, m.user2_id
+                           FROM conversations c
+                           JOIN matches m ON m.id = c.match_id
+                           WHERE c.id=%s""",
+                        (related,),
+                    )
+                    conv = cur.fetchone()
+                    if conv and user["id"] in (conv["user1_id"], conv["user2_id"]):
+                        return go_chat(related)
+                    # fallback profilo
+                    if conv:
+                        other = conv["user2_id"] if conv["user1_id"] == user["id"] else conv["user1_id"]
+                        return go_profile(other)
+                except Exception as e:
+                    print("notif open chat:", e)
+            return RedirectResponse("/chats", 303)
 
+        # --- MATCH → profilo altro (related = match_id) ---
         if tipo in ("nuovo_match", "match"):
-            # related = match_id → altro utente
+            other = None
             if related:
-                cur.execute("SELECT user1_id, user2_id FROM matches WHERE id=%s", (related,))
-                m = cur.fetchone()
-                if m:
-                    target_user = m["user2_id"] if m["user1_id"] == user["id"] else m["user1_id"]
+                try:
+                    cur.execute("SELECT user1_id, user2_id FROM matches WHERE id=%s", (related,))
+                    m = cur.fetchone()
+                    if m:
+                        other = m["user2_id"] if int(m["user1_id"]) == int(user["id"]) else m["user1_id"]
+                except Exception as e:
+                    print("notif open match:", e)
+            if other:
+                return go_profile(other)
+            return RedirectResponse("/matches", 303)
 
+        # --- DONO → profilo mittente (related = gifts_sent.id) ---
         if tipo in ("dono", "gift", "regalo"):
-            if related:
+            other = from_uid
+            if related and not other:
                 try:
                     cur.execute("SELECT from_user_id FROM gifts_sent WHERE id=%s", (related,))
                     g = cur.fetchone()
                     if g:
-                        target_user = g["from_user_id"]
-                except Exception:
-                    pass
+                        other = g["from_user_id"]
+                except Exception as e:
+                    print("notif open gift:", e)
+            if other:
+                return go_profile(other)
+            return RedirectResponse("/gifts", 303)
 
+        # --- LIKE → related_id = user_id di chi ha messo like ---
         if tipo in ("like", "superlike", "nuovo_like"):
-            # related potrebbe essere from_user_id o swipe id
+            other = from_uid or related
             if related:
                 try:
                     cur.execute("SELECT from_user_id FROM swipes WHERE id=%s", (related,))
                     s = cur.fetchone()
                     if s:
-                        target_user = s["from_user_id"]
-                    else:
-                        target_user = related  # assume user id
+                        other = s["from_user_id"]
                 except Exception:
-                    target_user = related
-
-        if tipo in ("richiesta_foto", "foto_decisione"):
-            if related:
-                # related often conversation_id
-                cur.close()
-                c.close()
-                return RedirectResponse(f"/chat/{related}", 303)
-
-        # from_user_id column se esiste
-        if not target_user and n.get("from_user_id"):
-            target_user = n["from_user_id"]
-
-        cur.close()
-        c.close()
-        if target_user:
-            return RedirectResponse(f"/u/{target_user}", 303)
-        if tipo in ("nuovo_match", "match"):
-            return RedirectResponse("/matches", 303)
-        if tipo in ("like", "superlike"):
+                    other = related
+            if other:
+                return go_profile(other)
             return RedirectResponse("/likes", 303)
+
+        # --- FOTO ---
+        if "foto" in tipo or "photo" in tipo:
+            if related:
+                return go_chat(related)
+            return RedirectResponse("/chats", 303)
+
+        # --- BOOST e altro ---
+        if tipo in ("boost",):
+            return RedirectResponse("/profile", 303)
+
+        if from_uid:
+            return go_profile(from_uid)
+        if related:
+            # prova come user id
+            try:
+                cur.execute("SELECT id FROM users WHERE id=%s", (related,))
+                if cur.fetchone():
+                    return go_profile(related)
+            except Exception:
+                pass
         return RedirectResponse("/notifications", 303)
+
     except Exception as e:
-        print("notification_open:", e)
+        print("notification_open fatal:", type(e).__name__, e)
+        return RedirectResponse("/notifications", 303)
+    finally:
         try:
-            cur.close()
-            c.close()
+            if cur:
+                cur.close()
+            if c:
+                c.close()
         except Exception:
             pass
-        return RedirectResponse("/notifications", 303)
 
 
 @app.get("/notifications", response_class=HTMLResponse)

@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invia dono – MyCheating</title>
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: #0a0a0a; font-family: 'Oswald', sans-serif; }
+        .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
+        .text-red-pure { color: #ff0000; }
+        .gift-card.selected { border-color: #ff0000; box-shadow: 0 0 20px rgba(255,0,0,0.25); }
+    </style>
+</head>
+<body class="text-white min-h-screen pb-10">
+    <div class="sticky top-0 z-20 bg-[#0a0a0a]/95 border-b border-white/10 px-4 py-3 flex items-center gap-3">
+        <a href="javascript:history.back()" class="text-gray-400 text-xl">←</a>
+        <div class="font-hot text-xl tracking-wider">Dono a {{ altro.nome }}</div>
+        <div class="ml-auto text-sm text-[#ff0000]">{{ user.credits or 0 }} cr.</div>
+    </div>
+
+    <div class="max-w-md mx-auto px-4 py-5">
+        {% if request.query_params.get('err') == 'crediti' %}
+        <div class="mb-4 bg-red-500/20 border border-red-500 text-red-300 text-center py-2 rounded-xl text-sm">Crediti insufficienti</div>
+        {% endif %}
+
+        <form method="post" action="/gifts/send/{{ altro.id }}" id="gift-form">
+            {% if conversation_id %}
+            <input type="hidden" name="conversation_id" value="{{ conversation_id }}">
+            {% endif %}
+            <input type="hidden" name="gift_type_id" id="gift_type_id" required>
+
+            <div class="grid grid-cols-2 gap-3 mb-5">
+                {% for g in types %}
+                <button type="button" class="gift-card bg-white/5 border border-white/10 rounded-2xl p-4 text-center"
+                        data-id="{{ g.id }}" data-cost="{{ g.costo }}"
+                        onclick="selectGift(this)">
+                    <div class="text-4xl mb-2">{{ g.emoji }}</div>
+                    <div class="font-hot">{{ g.nome }}</div>
+                    <div class="text-xs text-[#ff0000] mt-1">{{ g.costo }} crediti</div>
+                </button>
+                {% endfor %}
+            </div>
+
+            <input type="text" name="messaggio" maxlength="120" placeholder="Messaggio opzionale..."
+                   class="w-full bg-black/40 border border-white/15 rounded-xl px-4 py-3 text-sm mb-4 text-white placeholder-gray-500">
+
+            <button type="submit" id="btn-send" disabled
+                    class="w-full bg-[#ff0000] disabled:opacity-40 text-white font-semibold py-3.5 rounded-xl shadow-[0_0_24px_rgba(255,0,0,0.3)]">
+                Invia dono
+            </button>
+        </form>
+    </div>
+    <script>
+    function selectGift(el) {
+        document.querySelectorAll('.gift-card').forEach(c => c.classList.remove('selected'));
+        el.classList.add('selected');
+        document.getElementById('gift_type_id').value = el.dataset.id;
+        document.getElementById('btn-send').disabled = false;
+        document.getElementById('btn-send').textContent = 'Invia (' + el.dataset.cost + ' crediti)';
+    }
+    </script>
+</body>
+</html>

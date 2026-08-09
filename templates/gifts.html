@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Doni – MyCheating</title>
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: #0a0a0a; font-family: 'Oswald', sans-serif; }
+        .font-hot { font-family: 'Bebas Neue', sans-serif; letter-spacing: 1px; }
+        .text-red-pure { color: #ff0000; }
+    </style>
+</head>
+<body class="text-white min-h-screen pb-28">
+    <div class="sticky top-0 z-20 bg-[#0a0a0a]/95 border-b border-white/10 px-4 py-3 flex justify-between items-center">
+        <div class="font-hot text-xl tracking-wider"><span class="text-red-pure">🎁</span> DONI</div>
+        <div class="text-sm text-[#ff0000] font-hot">{{ user.credits or 0 }} crediti</div>
+    </div>
+
+    <div class="max-w-md mx-auto px-4 py-5">
+        {% if request.query_params.get('ok') %}
+        <div class="mb-4 bg-green-500/20 border border-green-500/40 text-green-300 text-center py-2 rounded-xl text-sm">Dono inviato!</div>
+        {% endif %}
+        {% if request.query_params.get('err') == 'restrizione' %}
+        <div class="mb-4 bg-red-500/20 border border-red-500 text-red-300 text-center py-2 rounded-xl text-sm">Non puoi inviare doni (restrizione)</div>
+        {% endif %}
+        {% if no_doni %}
+        <div class="mb-4 bg-yellow-500/10 border border-yellow-500/30 text-yellow-300 text-center py-2 rounded-xl text-sm">Hai una restrizione sull'invio doni</div>
+        {% endif %}
+
+        <h2 class="font-hot text-lg mb-3 tracking-wide">CATALOGO</h2>
+        <div class="grid grid-cols-2 gap-3 mb-8">
+            {% for g in types %}
+            <div class="bg-white/5 border border-white/10 rounded-2xl p-4 text-center">
+                <div class="text-4xl mb-2">{{ g.emoji }}</div>
+                <div class="font-hot text-base">{{ g.nome }}</div>
+                <div class="text-xs text-[#ff0000] mt-1">{{ g.costo }} crediti</div>
+            </div>
+            {% endfor %}
+        </div>
+        <p class="text-xs text-gray-500 mb-6 text-center">Per inviare un dono apri una chat o un match e tocca 🎁</p>
+
+        <h2 class="font-hot text-lg mb-3 tracking-wide">RICEVUTI</h2>
+        <div class="space-y-2 mb-8">
+            {% for g in ricevuti %}
+            <div class="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-4 py-3">
+                <span class="text-2xl">{{ g.emoji }}</span>
+                <div class="flex-1 min-w-0">
+                    <div class="text-sm"><span class="font-hot">{{ g.from_nome }}</span> · {{ g.nome }}</div>
+                    {% if g.messaggio %}<div class="text-xs text-gray-500 truncate">«{{ g.messaggio }}»</div>{% endif %}
+                </div>
+                <div class="text-[10px] text-gray-600">{{ g.created_at }}</div>
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-sm">Nessun dono ricevuto</p>
+            {% endfor %}
+        </div>
+
+        <h2 class="font-hot text-lg mb-3 tracking-wide">INVIATI</h2>
+        <div class="space-y-2">
+            {% for g in inviati %}
+            <div class="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-4 py-3">
+                <span class="text-2xl">{{ g.emoji }}</span>
+                <div class="flex-1 min-w-0">
+                    <div class="text-sm">A <span class="font-hot">{{ g.to_nome }}</span> · {{ g.nome }}</div>
+                </div>
+                <div class="text-[10px] text-gray-600">{{ g.created_at }}</div>
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-sm">Nessun dono inviato</p>
+            {% endfor %}
+        </div>
+    </div>
+
+    <nav class="fixed bottom-0 left-0 right-0 bg-[#0a0a0a]/95 border-t border-white/10 z-20">
+        <div class="max-w-md mx-auto grid grid-cols-5 h-[72px] text-[10px]">
+            <a href="/discover" class="flex flex-col items-center justify-center text-gray-500 gap-0.5"><span class="text-xl">🔥</span> Scopri</a>
+            <a href="/gifts" class="flex flex-col items-center justify-center text-red-pure gap-0.5"><span class="text-xl">🎁</span> Doni</a>
+            <a href="/chats" class="flex flex-col items-center justify-center text-gray-500 gap-0.5"><span class="text-xl">💬</span> Chat</a>
+            <a href="/matches" class="flex flex-col items-center justify-center text-gray-500 gap-0.5"><span class="text-xl">♥</span> Match</a>
+            <a href="/profile" class="flex flex-col items-center justify-center text-gray-500 gap-0.5"><span class="text-xl">👤</span> Tu</a>
+        </div>
+    </nav>
+</body>
+</html>

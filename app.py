@@ -1453,63 +1453,144 @@ async def admin_panel(req: Request):
 
     if tab == "messages":
         try:
-            if mq:
-                like = f"%{mq}%"
-                # conversazioni che contengono la parola
-                cur.execute("""
-                    SELECT DISTINCT c.id, c.ultimo_messaggio_at, m.data_match,
-                           m.user1_id, m.user2_id,
-                           u1.nome as nome1, u2.nome as nome2,
-                           (SELECT COUNT(*) FROM messages msg WHERE msg.conversation_id = c.id) as msg_count,
-                           (SELECT msg.contenuto FROM messages msg WHERE msg.conversation_id = c.id ORDER BY msg.id DESC LIMIT 1) as last_message
-                    FROM conversations c
-                    JOIN matches m ON m.id = c.match_id
-                    JOIN users u1 ON u1.id = m.user1_id
-                    JOIN users u2 ON u2.id = m.user2_id
-                    JOIN messages msg ON msg.conversation_id = c.id
-                    WHERE msg.contenuto ILIKE %s
-                    ORDER BY COALESCE(c.ultimo_messaggio_at, m.data_match) DESC
-                    LIMIT 200
-                """, (like,))
-                conversations = [dict(r) for r in cur.fetchall()]
-                # elenco messaggi che matchano
-                cur.execute("""
-                    SELECT msg.id, msg.contenuto, msg.conversation_id, msg.data_invio, msg.sender_id,
-                           u.nome as sender_nome, u1.nome as nome1, u2.nome as nome2
-                    FROM messages msg
-                    JOIN users u ON u.id = msg.sender_id
-                    JOIN conversations c ON c.id = msg.conversation_id
-                    JOIN matches m ON m.id = c.match_id
-                    JOIN users u1 ON u1.id = m.user1_id
-                    JOIN users u2 ON u2.id = m.user2_id
-                    WHERE msg.contenuto ILIKE %s
-                    ORDER BY msg.id DESC
-                    LIMIT 100
-                """, (like,))
-                message_hits = [dict(r) for r in cur.fetchall()]
-            else:
-                cur.execute("""
-                    SELECT c.id, c.ultimo_messaggio_at, m.data_match,
-                           m.user1_id, m.user2_id,
-                           u1.nome as nome1, u2.nome as nome2,
-                           (SELECT COUNT(*) FROM messages msg WHERE msg.conversation_id = c.id AND COALESCE(msg.eliminato,0)=0) as msg_count,
-                           (SELECT msg.contenuto FROM messages msg WHERE msg.conversation_id = c.id AND COALESCE(msg.eliminato,0)=0 ORDER BY msg.data_invio DESC LIMIT 1) as last_message
-                    FROM conversations c
-                    JOIN matches m ON m.id = c.match_id
-                    JOIN users u1 ON u1.id = m.user1_id
-                    JOIN users u2 ON u2.id = m.user2_id
-                    ORDER BY COALESCE(c.ultimo_messaggio_at, m.data_match) DESC
-                    LIMIT 200
-                """)
-                conversations = [dict(r) for r in cur.fetchall()]
+            mq_like = f"%{mq}%" if mq else None
 
+            if mq:
+                # 1) Messaggi che contengono la parola (query semplice)
+                try:
+                    cur.execute("""
+                        SELECT msg.id, msg.contenuto, msg.conversation_id, msg.data_invio, msg.sender_id,
+                               u.nome as sender_nome
+                        FROM messages msg
+                        LEFT JOIN users u ON u.id = msg.sender_id
+                        WHERE msg.contenuto ILIKE %s
+                        ORDER BY msg.id DESC
+                        LIMIT 150
+                    """, (mq_like,))
+                    raw_hits = [dict(r) for r in cur.fetchall()]
+                except Exception as e:
+                    print("msg hits simple:", e)
+                    c.rollback()
+                    raw_hits = []
+
+                # arricchisci con nomi chat
+                message_hits = []
+                conv_ids = set()
+                for h in raw_hits:
+                    cid = h.get("conversation_id")
+                    if cid:
+                        conv_ids.add(cid)
+                    h["nome1"] = h.get("nome1") or "?"
+                    h["nome2"] = h.get("nome2") or "?"
+                    message_hits.append(h)
+
+                # nomi partecipanti per ogni hit
+                for h in message_hits:
+                    try:
+                        cur.execute("""
+                            SELECT u1.nome as nome1, u2.nome as nome2
+                            FROM conversations c
+                            JOIN matches m ON m.id = c.match_id
+                            JOIN users u1 ON u1.id = m.user1_id
+                            JOIN users u2 ON u2.id = m.user2_id
+                            WHERE c.id = %s
+                        """, (h["conversation_id"],))
+                        row = cur.fetchone()
+                        if row:
+                            h["nome1"] = row["nome1"]
+                            h["nome2"] = row["nome2"]
+                    except Exception:
+                        try:
+                            c.rollback()
+                        except Exception:
+                            pass
+
+                # 2) Lista conversazioni filtrate
+                conversations = []
+                if conv_ids:
+                    ids = list(conv_ids)[:200]
+                    try:
+                        cur.execute("""
+                            SELECT c.id, c.ultimo_messaggio_at,
+                                   m.user1_id, m.user2_id,
+                                   u1.nome as nome1, u2.nome as nome2
+                            FROM conversations c
+                            JOIN matches m ON m.id = c.match_id
+                            JOIN users u1 ON u1.id = m.user1_id
+                            JOIN users u2 ON u2.id = m.user2_id
+                            WHERE c.id = ANY(%s)
+                            ORDER BY c.id DESC
+                        """, (ids,))
+                        conversations = [dict(r) for r in cur.fetchall()]
+                        for cv in conversations:
+                            # snippet del messaggio trovato
+                            for h in message_hits:
+                                if h.get("conversation_id") == cv["id"]:
+                                    cv["last_message"] = h.get("contenuto")
+                                    break
+                    except Exception as e:
+                        print("msg conv filter:", e)
+                        try:
+                            c.rollback()
+                        except Exception:
+                            pass
+                        # fallback senza ANY
+                        for cid in ids[:50]:
+                            try:
+                                cur.execute("""
+                                    SELECT c.id, u1.nome as nome1, u2.nome as nome2
+                                    FROM conversations c
+                                    JOIN matches m ON m.id = c.match_id
+                                    JOIN users u1 ON u1.id = m.user1_id
+                                    JOIN users u2 ON u2.id = m.user2_id
+                                    WHERE c.id = %s
+                                """, (cid,))
+                                row = cur.fetchone()
+                                if row:
+                                    d = dict(row)
+                                    d["last_message"] = next((h["contenuto"] for h in message_hits if h.get("conversation_id")==cid), "")
+                                    conversations.append(d)
+                            except Exception:
+                                c.rollback()
+            else:
+                try:
+                    cur.execute("""
+                        SELECT c.id, c.ultimo_messaggio_at, m.data_match,
+                               m.user1_id, m.user2_id,
+                               u1.nome as nome1, u2.nome as nome2
+                        FROM conversations c
+                        JOIN matches m ON m.id = c.match_id
+                        JOIN users u1 ON u1.id = m.user1_id
+                        JOIN users u2 ON u2.id = m.user2_id
+                        ORDER BY c.id DESC
+                        LIMIT 200
+                    """)
+                    conversations = [dict(r) for r in cur.fetchall()]
+                    for cv in conversations:
+                        try:
+                            cur.execute(
+                                "SELECT contenuto FROM messages WHERE conversation_id=%s ORDER BY id DESC LIMIT 1",
+                                (cv["id"],),
+                            )
+                            lm = cur.fetchone()
+                            cv["last_message"] = lm["contenuto"] if lm else ""
+                        except Exception:
+                            c.rollback()
+                            cv["last_message"] = ""
+                except Exception as e:
+                    print("msg list all:", e)
+                    c.rollback()
+                    conversations = []
+
+            # thread aperto
             conv_id = req.query_params.get("conv")
             if conv_id:
                 try:
                     conv_id = int(conv_id)
                 except Exception:
                     conv_id = None
-                if conv_id:
+            if conv_id:
+                try:
                     cur.execute("""
                         SELECT c.id, m.user1_id, m.user2_id, u1.nome as nome1, u2.nome as nome2
                         FROM conversations c
@@ -1522,27 +1603,37 @@ async def admin_panel(req: Request):
                     if row:
                         open_conversation = dict(row)
                         if mq:
-                            like = f"%{mq}%"
                             cur.execute("""
                                 SELECT m.id, m.sender_id, m.contenuto, m.data_invio, u.nome as sender_nome
                                 FROM messages m
-                                JOIN users u ON u.id = m.sender_id
-                                WHERE m.conversation_id = %s AND COALESCE(m.eliminato,0)=0
-                                  AND m.contenuto ILIKE %s
-                                ORDER BY m.data_invio ASC
-                            """, (conv_id, like))
+                                LEFT JOIN users u ON u.id = m.sender_id
+                                WHERE m.conversation_id = %s AND m.contenuto ILIKE %s
+                                ORDER BY m.id ASC
+                            """, (conv_id, mq_like))
                         else:
                             cur.execute("""
                                 SELECT m.id, m.sender_id, m.contenuto, m.data_invio, u.nome as sender_nome
                                 FROM messages m
-                                JOIN users u ON u.id = m.sender_id
-                                WHERE m.conversation_id = %s AND COALESCE(m.eliminato,0)=0
-                                ORDER BY m.data_invio ASC
+                                LEFT JOIN users u ON u.id = m.sender_id
+                                WHERE m.conversation_id = %s
+                                ORDER BY m.id ASC
                             """, (conv_id,))
                         thread_messages = [dict(r) for r in cur.fetchall()]
+                except Exception as e:
+                    print("msg thread:", e)
+                    try:
+                        c.rollback()
+                    except Exception:
+                        pass
         except Exception as e:
             print("admin messages error:", e)
-            conversations = []
+            try:
+                c.rollback()
+            except Exception:
+                pass
+            conversations = conversations or []
+            message_hits = message_hits or []
+
 
     if tab == "matches":
         cur.execute("""

@@ -143,3 +143,5 @@ SELECT * FROM (VALUES
     ('Corona', '👑', 100)
 ) AS v(nome, emoji, costo)
 WHERE NOT EXISTS (SELECT 1 FROM gift_types LIMIT 1);
+
+ALTER TABLE user_restrictions ADD COLUMN IF NOT EXISTS no_ricevere_doni INTEGER DEFAULT 0;

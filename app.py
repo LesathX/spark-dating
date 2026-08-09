@@ -217,6 +217,7 @@ def get_restrictions(user_id):
     defaults = {
         "no_gallery": 0, "no_like": 0, "no_messaggi": 0, "no_primo_messaggio": 0,
         "no_scopri": 0, "no_chat": 0, "no_vedi_foto": 0, "no_commenti": 0, "no_storie": 0,
+        "no_doni": 0, "no_ricevere_doni": 0,
     }
     try:
         c = db()
@@ -1954,7 +1955,7 @@ async def admin_user_update(req: Request, user_id: int):
             flags = [
                 "no_gallery", "no_like", "no_messaggi", "no_primo_messaggio",
                 "no_scopri", "no_chat", "no_vedi_foto", "no_commenti", "no_storie",
-                "no_post", "no_doni", "no_annunci", "no_annunci_personali",
+                "no_post", "no_doni", "no_ricevere_doni", "no_annunci", "no_annunci_personali",
                 "no_annunci_hot", "no_annunci_vendita", "no_annunci_scambio", "no_annunci_regalo",
             ]
             restr = {f: 1 if form.get(f) else 0 for f in flags}
@@ -2324,8 +2325,34 @@ async def gifts_send(req: Request, to_user_id: int, gift_type_id: int = Form(...
     cur.close()
     c.close()
 
+    # destinatario può ricevere?
+    r_to = get_restrictions(to_user_id)
+    if r_to.get("no_ricevere_doni"):
+        return RedirectResponse(f"/gifts/send/{to_user_id}?err=no_riceve", 303)
+
     if not spend_credits(user["id"], cost, f"dono_{gt['nome']}", to_user_id):
         return RedirectResponse(f"/gifts/send/{to_user_id}?err=crediti", 303)
+
+    # 50% crediti al destinatario (arrotondamento per difetto)
+    reward = cost // 2
+    if reward > 0:
+        try:
+            c0 = db()
+            cur0 = c0.cursor()
+            cur0.execute("UPDATE users SET credits = credits + %s WHERE id=%s", (reward, to_user_id))
+            try:
+                cur0.execute(
+                    """INSERT INTO credit_transactions (user_id, amount, tipo, related_user_id, note)
+                       VALUES (%s, %s, 'dono_ricevuto', %s, %s)""",
+                    (to_user_id, reward, user["id"], f"50% da dono {gt['nome']}"),
+                )
+            except Exception:
+                pass
+            c0.commit()
+            cur0.close()
+            c0.close()
+        except Exception as e:
+            print("gift reward error:", e)
 
     c = db()
     cur = c.cursor()

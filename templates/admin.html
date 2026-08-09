@@ -248,6 +248,7 @@
         <div class="text-[10px] text-gray-500 tracking-wider mb-1">DONI</div>
         <div class="border border-white/10 rounded-xl divide-y divide-white/5 mb-3">
           <label class="flex items-center gap-3 px-4 py-3 text-sm"><input type="checkbox" name="no_doni" id="r-doni" class="accent-[#ff0000]"> Inviare doni agli utenti</label>
+          <label class="flex items-center gap-3 px-4 py-3 text-sm"><input type="checkbox" name="no_ricevere_doni" id="r-riceve-doni" class="accent-[#ff0000]"> Ricevere doni</label>
         </div>
 
         <div class="text-[10px] text-gray-500 tracking-wider mb-1">SEZIONE ANNUNCI</div>
@@ -363,7 +364,7 @@ async function openManage(id) {
     set('r-like', r.no_like); set('r-commenti', r.no_commenti); set('r-storie', r.no_storie);
     set('r-gallery', r.no_gallery); set('r-msg', r.no_messaggi); set('r-scopri', r.no_scopri);
     set('r-primo', r.no_primo_messaggio); set('r-chat', r.no_chat); set('r-vedi', r.no_vedi_foto);
-    set('r-post', r.no_post); set('r-doni', r.no_doni);
+    set('r-post', r.no_post); set('r-doni', r.no_doni); set('r-riceve-doni', r.no_ricevere_doni);
     set('r-annunci', r.no_annunci); set('r-ann-pers', r.no_annunci_personali);
     set('r-ann-hot', r.no_annunci_hot); set('r-ann-vend', r.no_annunci_vendita);
     set('r-ann-scamb', r.no_annunci_scambio); set('r-ann-reg', r.no_annunci_regalo);

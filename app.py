@@ -341,7 +341,7 @@ async def reg(req: Request, email: str = Form(...), password: str = Form(...), u
         cur.execute("INSERT INTO user_preferences (user_id) VALUES (%s)", (uid,))
         c.commit()
         req.session["user_id"] = uid
-        return RedirectResponse("/verify-email", 303)
+        return RedirectResponse("/discover", 303)
     except psycopg2.IntegrityError:
         c.rollback()
         return templates.TemplateResponse("register.html", {"request": req, "error": "Email o username gia in uso"})
@@ -1868,6 +1868,47 @@ def _send_sms_otp(phone_e164: str, code: str) -> tuple:
     return True, "test"
 
 
+
+def send_otp_email(to_email: str, code: str, phone: str = None) -> bool:
+    """Invia OTP via SMTP. Supporta porta 587 (STARTTLS) e 465 (SSL)."""
+    import os, smtplib
+    from email.mime.text import MIMEText
+    host = os.environ.get("SMTP_HOST", "").strip()
+    user = os.environ.get("SMTP_USER", "").strip()
+    password = os.environ.get("SMTP_PASS", "").strip()
+    port = int(os.environ.get("SMTP_PORT", "587") or 587)
+    from_addr = os.environ.get("SMTP_FROM", user or "noreply@mycheating.it")
+    if not (host and user and password and to_email):
+        print(f"[EMAIL OTP TEST] {to_email} phone={phone} code={code}")
+        return False
+    body = f"MyCheating – codice di verifica: {code}\nValido 10 minuti.\n"
+    if phone:
+        body += f"Numero collegato (visibile solo a te): {phone}\n"
+    msg = MIMEText(body)
+    msg["Subject"] = "Codice verifica MyCheating"
+    msg["From"] = from_addr
+    msg["To"] = to_email
+    try:
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port, timeout=25) as s:
+                s.login(user, password)
+                s.sendmail(from_addr, [to_email], msg.as_string())
+        else:
+            with smtplib.SMTP(host, port, timeout=25) as s:
+                s.ehlo()
+                s.starttls()
+                s.ehlo()
+                s.login(user, password)
+                s.sendmail(from_addr, [to_email], msg.as_string())
+        print(f"[EMAIL OTP OK] sent to {to_email}")
+        return True
+    except Exception as e:
+        print("smtp send:", e)
+        print(f"[EMAIL OTP TEST fallback] {to_email} code={code}")
+        return False
+
+
+
 @app.get("/verify-phone", response_class=HTMLResponse)
 async def verify_phone_page(req: Request):
     user = current_user(req)
@@ -2122,13 +2163,10 @@ async def verify_email_send(req: Request):
             msg["Subject"] = "Codice verifica MyCheating"
             msg["From"] = smtp_from
             msg["To"] = email
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as s:
-                s.starttls()
-                s.login(smtp_user, smtp_pass)
-                s.sendmail(smtp_from, [email], msg.as_string())
-            sent = True
+            sent = send_otp_email(email, code)
         except Exception as e:
             print("smtp send:", e)
+            sent = False
     else:
         print(f"[EMAIL OTP TEST] {email} -> {code}")
 
@@ -2187,6 +2225,163 @@ async def verify_email_confirm(req: Request, otp: str = Form(...)):
         })
     cur.close(); c.close()
     return RedirectResponse("/profile?email=verified", 303)
+
+
+
+@app.post("/verify/start")
+async def verify_start(req: Request, prefix: str = Form("+39"), phone: str = Form(...)):
+    """Telefono privato + OTP via email (10 min)."""
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    if user.get("phone_verified") or user.get("is_verified"):
+        return RedirectResponse("/discover", 303)
+    e164 = _normalize_phone(prefix, phone)
+    if len(e164) < 10 or len(e164) > 18:
+        return RedirectResponse("/discover?verify_err=numero", 303)
+    import random
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS email_otps (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                email VARCHAR(200) NOT NULL,
+                code VARCHAR(10) NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                used INTEGER DEFAULT 0,
+                phone VARCHAR(32),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        c.commit()
+    except Exception:
+        try: c.rollback()
+        except Exception: pass
+    try:
+        cur.execute("ALTER TABLE email_otps ADD COLUMN IF NOT EXISTS phone VARCHAR(32)")
+        c.commit()
+    except Exception:
+        try: c.rollback()
+        except Exception: pass
+    try:
+        cur.execute(
+            "SELECT id FROM users WHERE telefono=%s AND COALESCE(phone_verified,0)=1 AND id<>%s LIMIT 1",
+            (e164, user["id"]),
+        )
+        if cur.fetchone():
+            cur.close(); c.close()
+            return RedirectResponse("/discover?verify_err=usato", 303)
+    except Exception:
+        try: c.rollback()
+        except Exception: pass
+    try:
+        cur.execute(
+            "SELECT COUNT(*) as n FROM email_otps WHERE user_id=%s AND created_at > NOW() - interval '1 hour'",
+            (user["id"],),
+        )
+        if int(cur.fetchone()["n"] or 0) >= 8:
+            cur.close(); c.close()
+            return RedirectResponse("/discover?verify_err=limit", 303)
+    except Exception:
+        try: c.rollback()
+        except Exception: pass
+
+    code = f"{random.randint(0, 999999):06d}"
+    email = user.get("email") or ""
+    try:
+        cur.execute(
+            """INSERT INTO email_otps (user_id, email, code, expires_at, phone)
+               VALUES (%s,%s,%s, NOW() + interval '10 minutes', %s)""",
+            (user["id"], email, code, e164),
+        )
+        cur.execute("UPDATE users SET telefono=%s WHERE id=%s", (e164, user["id"]))
+        c.commit()
+    except Exception as e:
+        print("verify start:", e)
+        try: c.rollback()
+        except Exception: pass
+        cur.close(); c.close()
+        return RedirectResponse("/discover?verify_err=db", 303)
+    cur.close(); c.close()
+
+    sent = send_otp_email(email, code, e164)
+    try:
+        req.session["verify_pending_phone"] = e164
+        if not sent:
+            req.session["verify_test_otp"] = code
+        else:
+            req.session.pop("verify_test_otp", None)
+    except Exception:
+        pass
+    return RedirectResponse("/discover?verify=otp", 303)
+
+
+@app.post("/verify/confirm")
+async def verify_confirm(req: Request, otp: str = Form(...)):
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    code = "".join(ch for ch in otp if ch.isdigit())
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute(
+            """SELECT id, phone FROM email_otps
+               WHERE user_id=%s AND code=%s AND used=0 AND expires_at > NOW()
+               ORDER BY id DESC LIMIT 1""",
+            (user["id"], code),
+        )
+        row = cur.fetchone()
+        if not row:
+            cur.close(); c.close()
+            return RedirectResponse("/discover?verify=otp&verify_err=codice", 303)
+        phone = row.get("phone") or user.get("telefono")
+        cur.execute("UPDATE email_otps SET used=1 WHERE id=%s", (row["id"],))
+        try:
+            cur.execute(
+                """UPDATE users SET telefono=%s, phone_verified=1, phone_verified_at=NOW(),
+                       is_verified=1, email_verified=1, email_verified_at=NOW()
+                   WHERE id=%s""",
+                (phone, user["id"]),
+            )
+        except Exception:
+            c.rollback()
+            try:
+                cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified INTEGER DEFAULT 0")
+                c.commit()
+                cur.execute(
+                    """UPDATE users SET telefono=%s, phone_verified=1, is_verified=1 WHERE id=%s""",
+                    (phone, user["id"]),
+                )
+            except Exception as e:
+                print("verify confirm:", e)
+                c.rollback()
+        c.commit()
+    except Exception as e:
+        print("verify confirm fatal:", e)
+        try: c.rollback()
+        except Exception: pass
+        cur.close(); c.close()
+        return RedirectResponse("/discover?verify=otp&verify_err=db", 303)
+    cur.close(); c.close()
+    try:
+        req.session.pop("verify_pending_phone", None)
+        req.session.pop("verify_test_otp", None)
+    except Exception:
+        pass
+    return RedirectResponse("/discover?verify=ok", 303)
+
+
+@app.post("/verify/dismiss")
+async def verify_dismiss(req: Request):
+    if current_user(req):
+        try:
+            req.session["verify_dismissed"] = 1
+        except Exception:
+            pass
+    return RedirectResponse("/discover", 303)
 
 
 @app.get("/verify-phone/skip")

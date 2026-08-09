@@ -116,8 +116,8 @@
     <div class="flex-1 overflow-y-auto px-3 py-3 space-y-2" id="messages">
       {% for msg in messaggi %}
       <div class="flex {% if msg.sender_id == user.id %}justify-end{% else %}justify-start{% endif %} msg-row"
-           data-expires="{{ msg.expires_at or '' }}" data-msg-id="{{ msg.id }}">
-        <div class="max-w-[80%] px-3 py-2 rounded-2xl text-sm {% if msg.expires_at %}msg-burn{% endif %}
+           data-expires-in="{{ msg.expires_in if msg.expires_in is not none else '' }}" data-msg-id="{{ msg.id }}">
+        <div class="max-w-[80%] px-3 py-2 rounded-2xl text-sm {% if msg.expires_in is not none %}msg-burn{% endif %}
             {% if msg.sender_id == user.id %}bg-[#ff0000] text-white rounded-br-md{% else %}bg-white/10 rounded-bl-md{% endif %}">
           {% set murl = msg.media_url or '' %}
           {% set mtype = msg.media_type or msg.tipo or '' %}
@@ -156,9 +156,14 @@
             <div>{{ msg.contenuto }}</div>
             {% endif %}
           {% endif %}
-          <div class="text-[10px] mt-1 opacity-60 text-right flex items-center justify-end gap-1">
-            {% if msg.expires_at %}<span class="text-yellow-300 countdown" data-exp="{{ msg.expires_at }}">⏱ …</span>{% endif %}
+          <div class="text-[10px] mt-1 opacity-60 text-right flex items-center justify-end gap-2">
+            {% if msg.expires_in is not none %}<span class="text-yellow-300 countdown">⏱ …</span>{% endif %}
             <span>{{ msg.ora or '' }}</span>
+            {% if msg.sender_id == user.id %}
+            <form method="post" action="/chat/{{ conversation_id }}/delete/{{ msg.id }}" class="inline" onsubmit="return confirm('Eliminare questo messaggio?');">
+              <button type="submit" class="text-[10px] opacity-70 hover:opacity-100" title="Elimina">🗑</button>
+            </form>
+            {% endif %}
           </div>
         </div>
       </div>
@@ -368,10 +373,9 @@
     }
   });
 
-  // Auto-destroy: countdown + hide + optional server delete
-  function fmtLeft(ms) {
-    if (ms <= 0) return '0s';
-    const s = Math.ceil(ms / 1000);
+    // Auto-destroy basato su secondi rimanenti dal server (affidabile)
+  function fmtLeft(s) {
+    s = Math.max(0, Math.ceil(s));
     if (s < 60) return s + 's';
     const m = Math.floor(s / 60);
     const r = s % 60;
@@ -379,25 +383,31 @@
     const h = Math.floor(m / 60);
     return h + 'h ' + (m % 60) + 'm';
   }
+  // inizializza leftover da data-expires-in
+  document.querySelectorAll('.msg-row[data-expires-in]').forEach(el => {
+    const v = el.getAttribute('data-expires-in');
+    if (v === '' || v === null) return;
+    const n = parseInt(v, 10);
+    if (isNaN(n)) return;
+    el._left = n;
+  });
   function checkExpire() {
-    const now = Date.now();
-    document.querySelectorAll('.msg-row[data-expires]').forEach(el => {
-      const exp = el.getAttribute('data-expires');
-      if (!exp) return;
-      let t = Date.parse(exp);
-      if (isNaN(t)) t = Date.parse(exp.replace(' ', 'T'));
-      if (isNaN(t)) return;
-      const left = t - now;
+    document.querySelectorAll('.msg-row[data-expires-in]').forEach(el => {
+      if (el._left === undefined || el._left === null) return;
       const cd = el.querySelector('.countdown');
-      if (cd) cd.textContent = left > 0 ? ('⏱ ' + fmtLeft(left)) : '⏱ 0s';
-      if (left <= 0) {
+      if (cd) cd.textContent = '⏱ ' + fmtLeft(el._left);
+      if (el._left <= 0) {
         el.innerHTML = '<div class="text-xs text-gray-600 italic px-2">💨 Messaggio autodistrutto</div>';
-        el.removeAttribute('data-expires');
+        el.removeAttribute('data-expires-in');
+        el._left = null;
+        return;
       }
+      el._left -= 1;
     });
   }
   setInterval(checkExpire, 1000);
   checkExpire();
+
 })();
 </script>
 </body>

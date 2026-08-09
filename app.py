@@ -297,7 +297,7 @@ def active_spell(user_id, spell_code):
         cur.execute("""
             SELECT * FROM spell_uses
             WHERE user_id=%s AND spell_code=%s
-              AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+              AND (expires_at IS NULL OR expires_at > NOW() - interval '2 seconds')
             ORDER BY created_at DESC LIMIT 1
         """, (user_id, spell_code))
         row = cur.fetchone()
@@ -847,7 +847,7 @@ async def chat_page(req: Request, conversation_id: int):
         # 3) messaggi (query minimali)
         # elimina messaggi autodistrutti scaduti
         try:
-            cur.execute("DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at < NOW()")
+            cur.execute("DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at < NOW() - interval '5 seconds'")
             c.commit()
         except Exception as e:
             print("delete expired:", e)
@@ -862,7 +862,7 @@ async def chat_page(req: Request, conversation_id: int):
                 cur.execute(
                     """SELECT id, conversation_id, sender_id, contenuto, data_invio, media_url, media_type, expires_at
                        FROM messages WHERE conversation_id=%s
-                         AND (expires_at IS NULL OR expires_at > NOW())
+                         AND (expires_at IS NULL OR expires_at > NOW() - interval '2 seconds')
                        ORDER BY id ASC LIMIT 500""",
                     (conversation_id,),
                 )
@@ -908,14 +908,30 @@ async def chat_page(req: Request, conversation_id: int):
                     ora = ""
             d["ora"] = ora
             exp = d.get("expires_at")
+            d["expires_in"] = None
             if exp is not None:
                 try:
-                    if hasattr(exp, "isoformat"):
-                        d["expires_at"] = exp.isoformat()
+                    from datetime import datetime, timezone
+                    if hasattr(exp, "timestamp"):
+                        # aware or naive datetime from DB
+                        ts = exp.timestamp() if exp.tzinfo else exp.replace(tzinfo=timezone.utc).timestamp()
                     else:
-                        d["expires_at"] = str(exp).replace(" ", "T")
-                except Exception:
-                    d["expires_at"] = str(exp)
+                        s = str(exp).replace(" ", "T")
+                        if s.endswith("Z"):
+                            s = s[:-1] + "+00:00"
+                        dt = datetime.fromisoformat(s)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        ts = dt.timestamp()
+                    left = int(ts - datetime.now(timezone.utc).timestamp())
+                    if left < 0:
+                        left = 0
+                    d["expires_in"] = left
+                    d["expires_at"] = str(int(ts))  # unix seconds for client
+                except Exception as e:
+                    print("expires parse:", e)
+                    d["expires_at"] = None
+                    d["expires_in"] = None
             messaggi.append(d)
 
         # 4) mark read (optional)
@@ -1019,19 +1035,20 @@ async def send_message(req: Request, conversation_id: int, contenuto: str = Form
         ttl = 0
     if ttl > 0:
         try:
+            # epoch ms lato client: salviamo expires_at in UTC esplicito
             cur.execute(
                 """INSERT INTO messages (conversation_id,sender_id,tipo,contenuto,expires_at)
-                   VALUES (%s,%s,'testo',%s, NOW() + make_interval(secs => %s))""",
-                (conversation_id, user["id"], contenuto, ttl),
+                   VALUES (%s,%s,'testo',%s, NOW() + (%s * interval '1 second'))""",
+                (conversation_id, user["id"], contenuto, int(ttl)),
             )
         except Exception as e:
-            print("insert ttl msg make_interval:", e)
+            print("insert ttl msg:", e)
             try:
                 c.rollback()
                 cur.execute(
                     """INSERT INTO messages (conversation_id,sender_id,tipo,contenuto,expires_at)
                        VALUES (%s,%s,'testo',%s, NOW() + (%s * interval '1 second'))""",
-                    (conversation_id, user["id"], contenuto, ttl),
+                    (conversation_id, user["id"], contenuto, int(ttl)),
                 )
             except Exception as e2:
                 print("insert ttl msg fallback:", e2)
@@ -1064,6 +1081,55 @@ async def send_message(req: Request, conversation_id: int, contenuto: str = Form
         await manager.send(altro_id, {"type": "nuovo_messaggio", "title": "Nuovo messaggio", "message": contenuto[:80], "conversation_id": conversation_id})
     except Exception:
         pass
+    return RedirectResponse(f"/chat/{conversation_id}", 303)
+
+
+
+@app.post("/chat/{conversation_id}/delete/{message_id}")
+async def delete_message(req: Request, conversation_id: int, message_id: int):
+    """Cancella un messaggio proprio (hard delete)."""
+    user = current_user(req)
+    if not user:
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        # verifica appartenenza conversazione
+        cur.execute("""SELECT c.id, m.user1_id, m.user2_id FROM conversations c
+               JOIN matches m ON m.id = c.match_id WHERE c.id=%s""", (conversation_id,))
+        conv = cur.fetchone()
+        if not conv or user["id"] not in (conv["user1_id"], conv["user2_id"]):
+            cur.close()
+            c.close()
+            return RedirectResponse("/chats", 303)
+        # solo i propri messaggi
+        cur.execute(
+            "SELECT id, sender_id FROM messages WHERE id=%s AND conversation_id=%s",
+            (message_id, conversation_id),
+        )
+        msg = cur.fetchone()
+        if not msg:
+            cur.close()
+            c.close()
+            return RedirectResponse(f"/chat/{conversation_id}", 303)
+        if msg["sender_id"] != user["id"] and not user.get("is_admin"):
+            cur.close()
+            c.close()
+            return RedirectResponse(f"/chat/{conversation_id}?err=not_yours", 303)
+        cur.execute("DELETE FROM messages WHERE id=%s", (message_id,))
+        c.commit()
+    except Exception as e:
+        print("delete_message:", e)
+        try:
+            c.rollback()
+        except Exception:
+            pass
+    finally:
+        try:
+            cur.close()
+            c.close()
+        except Exception:
+            pass
     return RedirectResponse(f"/chat/{conversation_id}", 303)
 
 
@@ -1186,9 +1252,9 @@ async def send_media(req: Request, conversation_id: int):
         if ttl > 0:
             cur.execute(
                 """INSERT INTO messages (conversation_id, sender_id, tipo, contenuto, media_url, media_type, expires_at)
-                   VALUES (%s,%s,%s,%s,%s,%s, NOW() + make_interval(secs => %s))
+                   VALUES (%s,%s,%s,%s,%s,%s, NOW() + (%s * interval '1 second'))
                    RETURNING id""",
-                (conversation_id, user["id"], kind, body, url, kind, ttl),
+                (conversation_id, user["id"], kind, body, url, kind, int(ttl)),
             )
         else:
             cur.execute(

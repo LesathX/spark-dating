@@ -1570,15 +1570,20 @@ async def admin_panel(req: Request):
             except Exception as e2:
                 print("admin blocks2:", e2)
 
+    search_results = []  # lista globale {tipo, titolo, sottotitolo, link, meta}
+
     if tab == "ricerca" and q:
         like = f"%{q}%"
+        # UTENTI
         try:
             cur.execute("""
-                SELECT id, nome, username, email, stato, is_admin, is_mod, credits, citta, data_nascita, ruolo, sospeso_fino
+                SELECT id, nome, username, email, stato, is_admin, is_mod, credits, citta, data_nascita, ruolo, sospeso_fino, bio, telefono
                 FROM users
                 WHERE nome ILIKE %s OR email ILIKE %s OR username ILIKE %s OR citta ILIKE %s
-                ORDER BY id DESC LIMIT 50
-            """, (like, like, like, like))
+                   OR COALESCE(bio,'') ILIKE %s OR COALESCE(telefono,'') ILIKE %s
+                   OR CAST(id AS TEXT) = %s
+                ORDER BY id DESC LIMIT 40
+            """, (like, like, like, like, like, like, q.strip()))
             users = [dict(u) for u in cur.fetchall()]
             for u in users:
                 u["restrictions"] = get_restrictions(u["id"])
@@ -1586,8 +1591,175 @@ async def admin_panel(req: Request):
                     u["eta"] = eta(u.get("data_nascita"))
                 except Exception:
                     u["eta"] = None
+                search_results.append({
+                    "tipo": "utente",
+                    "icon": "👤",
+                    "titolo": u.get("nome") or u.get("username") or "Utente",
+                    "sottotitolo": f"{u.get('email','')} · @{u.get('username','')} · {u.get('citta') or '—'}",
+                    "link": f"/admin?tab=users&q={u.get('email') or u.get('username') or ''}",
+                    "meta": u.get("stato") or "",
+                    "user_id": u["id"],
+                })
         except Exception as e:
-            print("admin ricerca:", e)
+            print("admin ricerca users:", e)
+
+        # MESSAGGI
+        try:
+            cur.execute("""
+                SELECT m.id, m.contenuto, m.conversation_id, m.sender_id, m.data_invio, u.nome as sender_nome
+                FROM messages m
+                LEFT JOIN users u ON u.id = m.sender_id
+                WHERE m.contenuto ILIKE %s
+                ORDER BY m.id DESC LIMIT 40
+            """, (like,))
+            for r in cur.fetchall():
+                d = dict(r)
+                search_results.append({
+                    "tipo": "messaggio",
+                    "icon": "✉️",
+                    "titolo": (d.get("contenuto") or "")[:120],
+                    "sottotitolo": f"Da {d.get('sender_nome') or d.get('sender_id')} · conv #{d.get('conversation_id')}",
+                    "link": f"/admin?tab=messages&conv={d.get('conversation_id')}",
+                    "meta": str(d.get("data_invio") or ""),
+                })
+        except Exception as e:
+            print("admin ricerca msg:", e)
+
+        # NOTIFICHE
+        try:
+            cur.execute("""
+                SELECT n.id, n.tipo, n.titolo, n.contenuto, n.user_id, n.data_creazione, u.nome as user_nome
+                FROM notifications n
+                LEFT JOIN users u ON u.id = n.user_id
+                WHERE n.titolo ILIKE %s OR n.contenuto ILIKE %s OR n.tipo ILIKE %s
+                ORDER BY n.id DESC LIMIT 30
+            """, (like, like, like))
+            for r in cur.fetchall():
+                d = dict(r)
+                search_results.append({
+                    "tipo": "notifica",
+                    "icon": "🔔",
+                    "titolo": d.get("titolo") or d.get("tipo") or "Notifica",
+                    "sottotitolo": f"{(d.get('contenuto') or '')[:80]} · a {d.get('user_nome') or d.get('user_id')}",
+                    "link": "/admin?tab=users",
+                    "meta": str(d.get("data_creazione") or ""),
+                })
+        except Exception as e:
+            print("admin ricerca notif:", e)
+
+        # DONI INVIATI
+        try:
+            cur.execute("""
+                SELECT g.id, g.messaggio, g.created_at, gt.nome, gt.emoji,
+                       uf.nome as from_nome, ut.nome as to_nome
+                FROM gifts_sent g
+                JOIN gift_types gt ON gt.id = g.gift_type_id
+                LEFT JOIN users uf ON uf.id = g.from_user_id
+                LEFT JOIN users ut ON ut.id = g.to_user_id
+                WHERE gt.nome ILIKE %s OR COALESCE(g.messaggio,'') ILIKE %s
+                   OR uf.nome ILIKE %s OR ut.nome ILIKE %s OR uf.email ILIKE %s OR ut.email ILIKE %s
+                ORDER BY g.id DESC LIMIT 30
+            """, (like, like, like, like, like, like))
+            for r in cur.fetchall():
+                d = dict(r)
+                search_results.append({
+                    "tipo": "dono",
+                    "icon": d.get("emoji") or "🎁",
+                    "titolo": f"{d.get('emoji','')} {d.get('nome')}",
+                    "sottotitolo": f"{d.get('from_nome')} → {d.get('to_nome')} · {(d.get('messaggio') or '')[:60]}",
+                    "link": "/admin?tab=doni",
+                    "meta": str(d.get("created_at") or ""),
+                })
+        except Exception as e:
+            print("admin ricerca gifts:", e)
+
+        # TIPI DONO
+        try:
+            cur.execute(
+                "SELECT * FROM gift_types WHERE nome ILIKE %s OR emoji ILIKE %s OR CAST(costo AS TEXT) ILIKE %s ORDER BY id LIMIT 20",
+                (like, like, like),
+            )
+            for r in cur.fetchall():
+                d = dict(r)
+                search_results.append({
+                    "tipo": "catalogo_dono",
+                    "icon": d.get("emoji") or "🎁",
+                    "titolo": f"{d.get('emoji')} {d.get('nome')} — {d.get('costo')} crediti",
+                    "sottotitolo": "Catalogo doni",
+                    "link": "/admin?tab=doni",
+                    "meta": "attivo" if d.get("attivo", 1) else "disattivo",
+                })
+        except Exception as e:
+            print("admin ricerca gift_types:", e)
+
+        # FOTO / GALLERY
+        try:
+            cur.execute("""
+                SELECT p.id, p.url, p.user_id, p.is_private, u.nome as nome_user, u.username
+                FROM user_photos p
+                LEFT JOIN users u ON u.id = p.user_id
+                WHERE COALESCE(p.url,'') ILIKE %s OR u.nome ILIKE %s OR u.username ILIKE %s OR u.email ILIKE %s
+                ORDER BY p.id DESC LIMIT 30
+            """, (like, like, like, like))
+            for r in cur.fetchall():
+                d = dict(r)
+                search_results.append({
+                    "tipo": "foto",
+                    "icon": "🖼️",
+                    "titolo": f"Media di {d.get('nome_user') or d.get('user_id')}",
+                    "sottotitolo": (d.get("url") or "")[:80] + (" · privata" if d.get("is_private") else ""),
+                    "link": "/admin?tab=foto",
+                    "meta": str(d.get("id")),
+                })
+        except Exception as e:
+            print("admin ricerca foto:", e)
+
+        # MATCH
+        try:
+            cur.execute("""
+                SELECT m.id, m.data_match, u1.nome as nome1, u2.nome as nome2, u1.email as email1, u2.email as email2
+                FROM matches m
+                JOIN users u1 ON u1.id = m.user1_id
+                JOIN users u2 ON u2.id = m.user2_id
+                WHERE u1.nome ILIKE %s OR u2.nome ILIKE %s OR u1.username ILIKE %s OR u2.username ILIKE %s
+                   OR u1.email ILIKE %s OR u2.email ILIKE %s
+                ORDER BY m.id DESC LIMIT 30
+            """, (like, like, like, like, like, like))
+            for r in cur.fetchall():
+                d = dict(r)
+                search_results.append({
+                    "tipo": "match",
+                    "icon": "♥",
+                    "titolo": f"{d.get('nome1')} ↔ {d.get('nome2')}",
+                    "sottotitolo": f"{d.get('email1')} · {d.get('email2')}",
+                    "link": "/admin?tab=messages",
+                    "meta": str(d.get("data_match") or ""),
+                })
+        except Exception as e:
+            print("admin ricerca match:", e)
+
+        # BLOCCHI
+        try:
+            cur.execute("""
+                SELECT b.*, u1.nome as blocker_nome, u2.nome as blocked_nome
+                FROM blocks b
+                JOIN users u1 ON u1.id = b.blocker_id
+                JOIN users u2 ON u2.id = b.blocked_id
+                WHERE u1.nome ILIKE %s OR u2.nome ILIKE %s OR u1.email ILIKE %s OR u2.email ILIKE %s
+                ORDER BY b.id DESC LIMIT 20
+            """, (like, like, like, like))
+            for r in cur.fetchall():
+                d = dict(r)
+                search_results.append({
+                    "tipo": "blocco",
+                    "icon": "🚫",
+                    "titolo": f"{d.get('blocker_nome')} ha bloccato {d.get('blocked_nome')}",
+                    "sottotitolo": "Blocco utenti",
+                    "link": "/admin?tab=blocchi",
+                    "meta": str(d.get("created_at") or d.get("id") or ""),
+                })
+        except Exception as e:
+            print("admin ricerca blocks:", e)
 
     cur.close()
     c.close()
@@ -1618,8 +1790,142 @@ async def admin_panel(req: Request):
         "gift_types": gift_types,
         "gifts_recent": gifts_recent,
         "blocks": blocks,
+        "search_results": search_results,
     })
 
+
+
+
+@app.post("/admin/gifts/create")
+async def admin_gift_create(req: Request):
+    if not require_admin(req):
+        return RedirectResponse("/login", 303)
+    form = await req.form()
+    nome = (form.get("nome") or "").strip()
+    emoji = (form.get("emoji") or "🎁").strip()[:10]
+    try:
+        costo = int(form.get("costo") or 10)
+    except Exception:
+        costo = 10
+    if costo < 0:
+        costo = 0
+    if not nome:
+        return RedirectResponse("/admin?tab=doni&err=nome", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute(
+            "INSERT INTO gift_types (nome, emoji, costo, attivo) VALUES (%s,%s,%s,1) RETURNING id",
+            (nome, emoji, costo),
+        )
+        c.commit()
+    except Exception as e:
+        c.rollback()
+        print("gift create:", e)
+        try:
+            cur.execute(
+                "INSERT INTO gift_types (nome, emoji, costo) VALUES (%s,%s,%s) RETURNING id",
+                (nome, emoji, costo),
+            )
+            c.commit()
+        except Exception as e2:
+            c.rollback()
+            print("gift create2:", e2)
+            cur.close()
+            c.close()
+            return RedirectResponse("/admin?tab=doni&err=db", 303)
+    cur.close()
+    c.close()
+    return RedirectResponse("/admin?tab=doni&ok=created", 303)
+
+
+@app.post("/admin/gifts/{gift_id}/update")
+async def admin_gift_update(req: Request, gift_id: int):
+    if not require_admin(req):
+        return RedirectResponse("/login", 303)
+    form = await req.form()
+    nome = (form.get("nome") or "").strip()
+    emoji = (form.get("emoji") or "🎁").strip()[:10]
+    try:
+        costo = int(form.get("costo") or 10)
+    except Exception:
+        costo = 10
+    attivo = 1 if form.get("attivo") in ("1", "on", "true", "True") else 0
+    if not nome:
+        return RedirectResponse("/admin?tab=doni&err=nome", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute(
+            "UPDATE gift_types SET nome=%s, emoji=%s, costo=%s, attivo=%s WHERE id=%s",
+            (nome, emoji, costo, attivo, gift_id),
+        )
+        c.commit()
+    except Exception as e:
+        c.rollback()
+        print("gift update:", e)
+        try:
+            cur.execute(
+                "UPDATE gift_types SET nome=%s, emoji=%s, costo=%s WHERE id=%s",
+                (nome, emoji, costo, gift_id),
+            )
+            c.commit()
+        except Exception as e2:
+            c.rollback()
+            print("gift update2:", e2)
+    cur.close()
+    c.close()
+    return RedirectResponse("/admin?tab=doni&ok=updated", 303)
+
+
+@app.post("/admin/gifts/{gift_id}/delete")
+async def admin_gift_delete(req: Request, gift_id: int):
+    if not require_admin(req):
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        # soft delete se ha invii
+        cur.execute("SELECT COUNT(*) as c FROM gifts_sent WHERE gift_type_id=%s", (gift_id,))
+        cnt = cur.fetchone()
+        n = cnt["c"] if cnt else 0
+        if n and n > 0:
+            try:
+                cur.execute("UPDATE gift_types SET attivo=0 WHERE id=%s", (gift_id,))
+            except Exception:
+                cur.execute("DELETE FROM gift_types WHERE id=%s", (gift_id,))
+        else:
+            cur.execute("DELETE FROM gift_types WHERE id=%s", (gift_id,))
+        c.commit()
+    except Exception as e:
+        c.rollback()
+        print("gift delete:", e)
+        return RedirectResponse("/admin?tab=doni&err=delete", 303)
+    finally:
+        cur.close()
+        c.close()
+    return RedirectResponse("/admin?tab=doni&ok=deleted", 303)
+
+
+@app.post("/admin/gifts/{gift_id}/toggle")
+async def admin_gift_toggle(req: Request, gift_id: int):
+    if not require_admin(req):
+        return RedirectResponse("/login", 303)
+    c = db()
+    cur = c.cursor()
+    try:
+        cur.execute("SELECT COALESCE(attivo,1) as attivo FROM gift_types WHERE id=%s", (gift_id,))
+        row = cur.fetchone()
+        if row:
+            new_a = 0 if row["attivo"] else 1
+            cur.execute("UPDATE gift_types SET attivo=%s WHERE id=%s", (new_a, gift_id))
+            c.commit()
+    except Exception as e:
+        c.rollback()
+        print("gift toggle:", e)
+    cur.close()
+    c.close()
+    return RedirectResponse("/admin?tab=doni", 303)
 
 @app.post("/admin/ban/{user_id}")
 async def admin_ban(req: Request, user_id: int):

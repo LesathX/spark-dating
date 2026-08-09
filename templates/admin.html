@@ -58,8 +58,8 @@
       <a href="/admin?tab=foto" class="sidebar-item flex items-center gap-3 px-4 py-2.5 text-sm {% if tab == 'foto' %}active{% else %}text-gray-400{% endif %}">
         <span class="text-base">🖼️</span>
         <span class="flex-1">
-          <span class="label block font-semibold text-[13px]">FOTO</span>
-          <span class="text-[10px] text-gray-600">Galleria & storie</span>
+          <span class="label block font-semibold text-[13px]">GALLERY</span>
+          <span class="text-[10px] text-gray-600">Cartelle foto & video</span>
         </span>
       </a>
       <a href="/admin?tab=commenti" class="sidebar-item flex items-center gap-3 px-4 py-2.5 text-sm {% if tab == 'commenti' %}active{% else %}text-gray-400{% endif %}">
@@ -163,7 +163,7 @@
         <span class="text-white uppercase">
           {% if tab == 'users' %}GESTIONE UTENTI
           {% elif tab == 'posts' %}POST
-          {% elif tab == 'foto' %}FOTO
+          {% elif tab == 'foto' %}GALLERY
           {% elif tab == 'commenti' %}COMMENTI
           {% elif tab == 'messages' %}MESSAGGI
           {% elif tab == 'ricerca' %}RICERCA
@@ -345,8 +345,17 @@
 
 <!-- ========== FOTO ========== -->
       {% elif tab == 'foto' %}
-      <h1 class="font-hot text-4xl tracking-wide mb-2">FOTO</h1>
-      <p class="text-gray-500 text-sm mb-6">Cartelle per proprietario — clicca una cartella per vedere i media</p>
+      <h1 class="font-hot text-4xl tracking-wide mb-2">GALLERY</h1>
+      <p class="text-gray-500 text-sm mb-4">Cartelle per proprietario — cerca un utente e apri la sua cartella</p>
+      <form method="get" action="/admin" class="flex gap-2 mb-4 max-w-xl">
+        <input type="hidden" name="tab" value="foto">
+        <input type="text" name="fq" value="{{ fq or '' }}" placeholder="Cerca cartella: nome, username, email o telefono..." class="flex-1 rounded-lg px-4 py-2.5 text-sm">
+        <button class="bg-[#ff0000] px-5 py-2.5 rounded-lg font-semibold text-sm">CERCA</button>
+        {% if fq %}<a href="/admin?tab=foto" class="border border-white/20 px-4 py-2.5 rounded-lg text-sm text-gray-400">✕</a>{% endif %}
+      </form>
+      {% if fq %}
+      <p class="text-xs text-gray-500 mb-3">Cartelle trovate per «{{ fq }}»: {{ gallery_folders|length if gallery_folders else 0 }}</p>
+      {% endif %}
 
       <div class="flex flex-col md:flex-row gap-4 min-h-[420px]">
         <!-- Contenuto cartella (sinistra) -->
@@ -357,7 +366,7 @@
               <div class="font-hot text-xl tracking-wide">📁 {{ folder_user.nome or folder_user.username or ('User '~folder_user_id) }}</div>
               <div class="text-xs text-gray-500">{{ folder_user.email or '' }} · {{ gallery_items|length }} file</div>
             </div>
-            <a href="/admin?tab=foto" class="text-xs border border-white/20 px-3 py-1.5 rounded-lg text-gray-400 hover:text-white">← Chiudi cartella</a>
+            <a href="/admin?tab=foto{% if fq %}&fq={{ fq }}{% endif %}" class="text-xs border border-white/20 px-3 py-1.5 rounded-lg text-gray-400 hover:text-white">← Chiudi cartella</a>
           </div>
           <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
             {% for p in gallery_items %}
@@ -394,7 +403,7 @@
           </div>
           <div class="overflow-y-auto flex-1">
             {% for f in gallery_folders %}
-            <a href="/admin?tab=foto&user={{ f.user_id }}"
+            <a href="/admin?tab=foto&user={{ f.user_id }}{% if fq %}&fq={{ fq }}{% endif %}"
                class="flex items-center gap-3 px-4 py-3 border-b border-white/5 hover:bg-[#ff0000]/10 transition {% if folder_user_id and folder_user_id == f.user_id %}bg-[#ff0000]/15 border-l-2 border-l-[#ff0000]{% endif %}">
               <div class="w-11 h-11 rounded-lg bg-gradient-to-br from-yellow-700/40 to-yellow-900/20 border border-yellow-600/30 flex items-center justify-center text-2xl shrink-0">📁</div>
               <div class="min-w-0 flex-1">
@@ -406,7 +415,7 @@
               <span class="text-gray-600 text-xs">›</span>
             </a>
             {% else %}
-            <p class="p-6 text-gray-500 text-sm text-center">Nessuna cartella — nessuno ha caricato media</p>
+            <p class="p-6 text-gray-500 text-sm text-center">{% if fq %}Nessuna cartella per «{{ fq }}»{% else %}Nessuna cartella — nessuno ha caricato media{% endif %}</p>
             {% endfor %}
           </div>
         </div>

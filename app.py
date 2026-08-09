@@ -1385,6 +1385,7 @@ async def admin_panel(req: Request):
     mq = (req.query_params.get("mq") or "").strip()
     message_hits = []
     bots = []
+    fq = (req.query_params.get("fq") or "").strip()
     filter_stato = req.query_params.get("filter") or "tutti"
 
     c = db()
@@ -1668,28 +1669,58 @@ async def admin_panel(req: Request):
 
     if tab == "foto":
         try:
-            cur.execute("""
-                SELECT p.user_id,
-                       u.nome as nome_user,
-                       u.username,
-                       u.email,
-                       COUNT(*) as cnt,
-                       SUM(CASE WHEN COALESCE(p.is_private,0)=1 THEN 1 ELSE 0 END) as private_cnt
-                FROM user_photos p
-                LEFT JOIN users u ON u.id = p.user_id
-                GROUP BY p.user_id, u.nome, u.username, u.email
-                ORDER BY u.nome NULLS LAST, p.user_id
-            """)
+            if fq:
+                like = f"%{fq}%"
+                cur.execute("""
+                    SELECT p.user_id,
+                           u.nome as nome_user,
+                           u.username,
+                           u.email,
+                           COUNT(*) as cnt,
+                           SUM(CASE WHEN COALESCE(p.is_private,0)=1 THEN 1 ELSE 0 END) as private_cnt
+                    FROM user_photos p
+                    LEFT JOIN users u ON u.id = p.user_id
+                    WHERE u.nome ILIKE %s OR u.username ILIKE %s OR u.email ILIKE %s
+                       OR COALESCE(u.telefono,'') ILIKE %s
+                       OR CAST(p.user_id AS TEXT) = %s
+                    GROUP BY p.user_id, u.nome, u.username, u.email
+                    ORDER BY u.nome NULLS LAST, p.user_id
+                """, (like, like, like, like, fq.strip()))
+            else:
+                cur.execute("""
+                    SELECT p.user_id,
+                           u.nome as nome_user,
+                           u.username,
+                           u.email,
+                           COUNT(*) as cnt,
+                           SUM(CASE WHEN COALESCE(p.is_private,0)=1 THEN 1 ELSE 0 END) as private_cnt
+                    FROM user_photos p
+                    LEFT JOIN users u ON u.id = p.user_id
+                    GROUP BY p.user_id, u.nome, u.username, u.email
+                    ORDER BY u.nome NULLS LAST, p.user_id
+                """)
             gallery_folders = [dict(r) for r in cur.fetchall()]
         except Exception as e:
             print("admin foto folders:", e)
             try:
-                cur.execute("""
-                    SELECT DISTINCT p.user_id, u.nome as nome_user, u.username, u.email
-                    FROM user_photos p
-                    LEFT JOIN users u ON u.id = p.user_id
-                    ORDER BY u.nome NULLS LAST
-                """)
+                c.rollback()
+                if fq:
+                    like = f"%{fq}%"
+                    cur.execute("""
+                        SELECT DISTINCT p.user_id, u.nome as nome_user, u.username, u.email
+                        FROM user_photos p
+                        LEFT JOIN users u ON u.id = p.user_id
+                        WHERE u.nome ILIKE %s OR u.username ILIKE %s OR u.email ILIKE %s
+                           OR COALESCE(u.telefono,'') ILIKE %s
+                        ORDER BY u.nome NULLS LAST
+                    """, (like, like, like, like))
+                else:
+                    cur.execute("""
+                        SELECT DISTINCT p.user_id, u.nome as nome_user, u.username, u.email
+                        FROM user_photos p
+                        LEFT JOIN users u ON u.id = p.user_id
+                        ORDER BY u.nome NULLS LAST
+                    """)
                 gallery_folders = []
                 for r in cur.fetchall():
                     d = dict(r)
@@ -2019,6 +2050,7 @@ async def admin_panel(req: Request):
         "gallery_folders": gallery_folders,
         "folder_user_id": folder_user_id,
         "folder_user": folder_user,
+        "fq": fq,
         "gift_types": gift_types,
         "gifts_recent": gifts_recent,
         "blocks": blocks,

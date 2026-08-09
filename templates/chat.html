@@ -119,16 +119,43 @@
            data-expires="{{ msg.expires_at or '' }}" data-msg-id="{{ msg.id }}">
         <div class="max-w-[80%] px-3 py-2 rounded-2xl text-sm {% if msg.expires_at %}msg-burn{% endif %}
             {% if msg.sender_id == user.id %}bg-[#ff0000] text-white rounded-br-md{% else %}bg-white/10 rounded-bl-md{% endif %}">
-          {% if msg.media_url %}
-            {% if msg.media_type == 'video' or (msg.media_url and ('.mp4' in msg.media_url|string or '.webm' in msg.media_url|string)) %}
-            <video src="{{ msg.media_url }}" class="rounded-lg max-w-full max-h-48 mb-1" controls playsinline></video>
-            {% elif msg.media_type == 'audio' or (msg.media_url and ('.webm' in msg.media_url|string or '.mp3' in msg.media_url|string or '.ogg' in msg.media_url|string or '.m4a' in msg.media_url|string)) %}
-            <audio src="{{ msg.media_url }}" controls class="w-full max-w-xs mb-1"></audio>
+          {% set murl = msg.media_url or '' %}
+          {% set mtype = msg.media_type or msg.tipo or '' %}
+          {% if murl %}
+            {% if mtype == 'video' or '.mp4' in murl or (mtype != 'audio' and '.webm' in murl and 'nota_audio' not in murl) %}
+            <video src="{{ murl }}" class="rounded-lg max-w-full max-h-52 mb-1" controls playsinline></video>
+            {% elif mtype == 'audio' or '.mp3' in murl or '.m4a' in murl or '.ogg' in murl or 'nota_audio' in murl %}
+            <audio src="{{ murl }}" controls class="w-full max-w-xs mb-1"></audio>
             {% else %}
-            <img src="{{ msg.media_url }}" class="rounded-lg max-w-full max-h-48 mb-1" alt="" draggable="false">
+            <a href="{{ murl }}" target="_blank" rel="noopener">
+              <img src="{{ murl }}" class="rounded-lg max-w-full max-h-52 mb-1" alt="foto" draggable="false">
+            </a>
             {% endif %}
           {% endif %}
-          {% if msg.contenuto %}<div>{{ msg.contenuto }}</div>{% endif %}
+          {% if msg.contenuto %}
+            {% set txt = msg.contenuto|string %}
+            {# se contenuto è solo etichetta + url e abbiamo già media_url, mostra solo etichetta #}
+            {% if murl and (txt.startswith('📷') or txt.startswith('🎬') or txt.startswith('🎤') or txt.startswith('📎')) %}
+            <div class="text-xs opacity-80">{{ txt.split('
+')[0] }}</div>
+            {% elif not murl and ('http' in txt or '/static/' in txt) %}
+              {% set lines = txt.split('
+') %}
+              <div>{{ lines[0] }}</div>
+              {% if lines|length > 1 %}
+                {% set u = lines[1] %}
+                {% if '.mp4' in u or '.webm' in u %}
+                <video src="{{ u }}" class="rounded-lg max-w-full max-h-52 mt-1" controls playsinline></video>
+                {% elif '.mp3' in u or '.m4a' in u or 'nota_audio' in u %}
+                <audio src="{{ u }}" controls class="w-full max-w-xs mt-1"></audio>
+                {% else %}
+                <img src="{{ u }}" class="rounded-lg max-w-full max-h-52 mt-1" alt="" draggable="false">
+                {% endif %}
+              {% endif %}
+            {% else %}
+            <div>{{ msg.contenuto }}</div>
+            {% endif %}
+          {% endif %}
           <div class="text-[10px] mt-1 opacity-60 text-right flex items-center justify-end gap-1">
             {% if msg.expires_at %}<span class="text-yellow-300">⏱ autodistr.</span>{% endif %}
             <span>{{ msg.ora or '' }}</span>
@@ -180,13 +207,16 @@
       <button type="submit" class="w-11 h-11 rounded-full bg-[#ff0000] text-white flex items-center justify-center shrink-0">➤</button>
     </form>
 
-    <!-- Form media nascosto -->
+    <!-- Form media -->
     <form method="post" action="/chat/{{ conversation_id }}/send-media" enctype="multipart/form-data" id="form-media" class="hidden">
-      <input type="file" name="file" id="media-file">
+      <input type="file" name="file" id="media-file" accept="image/*,video/*,audio/*">
       <input type="hidden" name="ttl_seconds" id="ttl-media" value="0">
       <input type="hidden" name="media_kind" id="media-kind" value="image">
-      <input type="text" name="contenuto" value="">
+      <input type="hidden" name="contenuto" id="media-caption" value="">
     </form>
+    <div id="media-uploading" class="hidden fixed inset-0 z-50 bg-black/70 flex items-center justify-center text-white text-sm">
+      ⏳ Caricamento media…
+    </div>
   </div>
 </div>
 
@@ -262,53 +292,79 @@
   ttl?.addEventListener('change', syncTtl);
   syncTtl();
 
-  // Media files
-  function sendFile(input, kind) {
-    if (!input.files || !input.files[0]) return;
+  // Media upload via FormData (affidabile)
+  const convId = {{ conversation_id }};
+  async function uploadMedia(file, kind) {
+    if (!file) return;
     syncTtl();
-    document.getElementById('media-kind').value = kind;
-    const mf = document.getElementById('media-file');
-    const dt = new DataTransfer();
-    dt.items.add(input.files[0]);
-    mf.files = dt.files;
-    document.getElementById('form-media').submit();
+    const overlay = document.getElementById('media-uploading');
+    if (overlay) overlay.classList.remove('hidden');
+    const fd = new FormData();
+    fd.append('file', file, file.name || ('media.' + (kind === 'audio' ? 'webm' : 'bin')));
+    fd.append('media_kind', kind);
+    fd.append('ttl_seconds', document.getElementById('ttl')?.value || '0');
+    fd.append('contenuto', '');
+    try {
+      const res = await fetch('/chat/' + convId + '/send-media', {
+        method: 'POST',
+        body: fd,
+        credentials: 'same-origin',
+        redirect: 'follow'
+      });
+      // dopo upload ricarica chat
+      window.location.href = '/chat/' + convId;
+    } catch (err) {
+      console.error(err);
+      alert('Errore invio media');
+      if (overlay) overlay.classList.add('hidden');
+    }
   }
-  document.getElementById('file-photo')?.addEventListener('change', e => sendFile(e.target, 'image'));
-  document.getElementById('file-video')?.addEventListener('change', e => sendFile(e.target, 'video'));
+  document.getElementById('file-photo')?.addEventListener('change', e => {
+    const f = e.target.files && e.target.files[0];
+    if (f) uploadMedia(f, 'image');
+    e.target.value = '';
+  });
+  document.getElementById('file-video')?.addEventListener('change', e => {
+    const f = e.target.files && e.target.files[0];
+    if (f) uploadMedia(f, 'video');
+    e.target.value = '';
+  });
 
   // Audio record
-  let rec = null, chunks = [], recording = false;
+  let rec = null, chunks = [], recording = false, mediaStream = null;
   document.getElementById('btn-audio')?.addEventListener('click', async () => {
     const st = document.getElementById('audio-status');
+    const btn = document.getElementById('btn-audio');
     if (!recording) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        rec = new MediaRecorder(stream);
+        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
+        rec = mime ? new MediaRecorder(mediaStream, { mimeType: mime }) : new MediaRecorder(mediaStream);
         chunks = [];
-        rec.ondataavailable = e => chunks.push(e.data);
+        rec.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
         rec.onstop = () => {
-          const blob = new Blob(chunks, { type: 'audio/webm' });
-          const file = new File([blob], 'nota_audio.webm', { type: 'audio/webm' });
-          syncTtl();
-          document.getElementById('media-kind').value = 'audio';
-          const mf = document.getElementById('media-file');
-          const dt = new DataTransfer();
-          dt.items.add(file);
-          mf.files = dt.files;
-          document.getElementById('form-media').submit();
+          try { mediaStream.getTracks().forEach(tr => tr.stop()); } catch(e) {}
+          const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+          if (blob.size < 50) {
+            alert('Registrazione troppo corta');
+            return;
+          }
+          const file = new File([blob], 'nota_audio.webm', { type: blob.type || 'audio/webm' });
+          uploadMedia(file, 'audio');
         };
-        rec.start();
+        rec.start(200);
         recording = true;
         st.classList.remove('hidden');
-        document.getElementById('btn-audio').textContent = '⏹';
+        btn.textContent = '⏹';
       } catch (err) {
-        alert('Microfono non disponibile');
+        console.error(err);
+        alert('Microfono non disponibile o permesso negato');
       }
     } else {
-      rec.stop();
+      try { rec.stop(); } catch(e) {}
       recording = false;
       st.classList.add('hidden');
-      document.getElementById('btn-audio').textContent = '🎤';
+      btn.textContent = '🎤';
     }
   });
 

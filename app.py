@@ -847,11 +847,21 @@ async def chat_page(req: Request, conversation_id: int):
         # 3) messaggi (query minimali)
         rows = []
         try:
-            cur.execute(
-                """SELECT id, conversation_id, sender_id, contenuto, data_invio
-                   FROM messages WHERE conversation_id=%s ORDER BY id ASC LIMIT 500""",
-                (conversation_id,),
-            )
+            try:
+                cur.execute(
+                    """SELECT id, conversation_id, sender_id, contenuto, data_invio, media_url, media_type, expires_at
+                       FROM messages WHERE conversation_id=%s
+                         AND (expires_at IS NULL OR expires_at > NOW())
+                       ORDER BY id ASC LIMIT 500""",
+                    (conversation_id,),
+                )
+            except Exception:
+                c.rollback()
+                cur.execute(
+                    """SELECT id, conversation_id, sender_id, contenuto, data_invio
+                       FROM messages WHERE conversation_id=%s ORDER BY id ASC LIMIT 500""",
+                    (conversation_id,),
+                )
             rows = cur.fetchall()
         except Exception as e:
             print("chat msgs simple:", e)
@@ -1040,111 +1050,190 @@ async def send_media(req: Request, conversation_id: int):
     r = get_restrictions(user["id"])
     if r.get("no_messaggi") or r.get("no_chat"):
         return RedirectResponse(f"/chat/{conversation_id}?err=no_msg", 303)
+
     form = await req.form()
     file = form.get("file")
     try:
         ttl = int(form.get("ttl_seconds") or 0)
     except Exception:
         ttl = 0
-    kind = (form.get("media_kind") or "image").strip()
-    caption = (form.get("contenuto") or "").strip()
-    if not file or not getattr(file, "filename", None):
-        return RedirectResponse(f"/chat/{conversation_id}", 303)
+    kind = (str(form.get("media_kind") or "image")).strip().lower()
+    if kind not in ("image", "video", "audio"):
+        kind = "image"
+    caption = (str(form.get("contenuto") or "")).strip()
+
+    # Validazione file
+    if file is None or not getattr(file, "filename", None):
+        print("send_media: no file in form")
+        return RedirectResponse(f"/chat/{conversation_id}?err=nofile", 303)
 
     c = db()
     cur = c.cursor()
-    cur.execute("""SELECT c.id, m.user1_id, m.user2_id FROM conversations c
-           JOIN matches m ON m.id = c.match_id WHERE c.id=%s""", (conversation_id,))
-    conv = cur.fetchone()
+    try:
+        cur.execute("""SELECT c.id, m.user1_id, m.user2_id FROM conversations c
+               JOIN matches m ON m.id = c.match_id WHERE c.id=%s""", (conversation_id,))
+        conv = cur.fetchone()
+    except Exception as e:
+        print("send_media conv:", e)
+        cur.close()
+        c.close()
+        return RedirectResponse("/chats", 303)
+
     if not conv or user["id"] not in (conv["user1_id"], conv["user2_id"]):
         cur.close()
         c.close()
         return RedirectResponse("/chats", 303)
 
-    # upload
-    url = None
+    # Leggi bytes
     try:
         data = await file.read()
-        fname = file.filename or "media.bin"
-        import uuid, os
-        ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else "bin"
-        content_type = getattr(file, "content_type", None) or "application/octet-stream"
-        if kind == "image" or content_type.startswith("image/"):
-            content_type = content_type if content_type.startswith("image/") else "image/jpeg"
-        elif kind == "video":
-            content_type = content_type if content_type.startswith("video/") else "video/mp4"
-        elif kind == "audio":
-            content_type = content_type if content_type.startswith("audio/") else "audio/webm"
-        storage_path = f"chat/{user['id']}/{uuid.uuid4().hex}.{ext}"
+    except Exception as e:
+        print("send_media read:", e)
+        cur.close()
+        c.close()
+        return RedirectResponse(f"/chat/{conversation_id}?err=media", 303)
+
+    if not data or len(data) < 10:
+        print("send_media empty file")
+        cur.close()
+        c.close()
+        return RedirectResponse(f"/chat/{conversation_id}?err=empty", 303)
+
+    import uuid, os
+    fname = file.filename or "media.bin"
+    ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else "bin"
+    if len(ext) > 8:
+        ext = "bin"
+    content_type = getattr(file, "content_type", None) or "application/octet-stream"
+    if kind == "image":
+        content_type = content_type if str(content_type).startswith("image/") else "image/jpeg"
+        if ext not in ("jpg", "jpeg", "png", "gif", "webp", "heic"):
+            ext = "jpg"
+    elif kind == "video":
+        content_type = content_type if str(content_type).startswith("video/") else "video/mp4"
+        if ext not in ("mp4", "webm", "mov", "mkv"):
+            ext = "mp4"
+    elif kind == "audio":
+        content_type = content_type if str(content_type).startswith("audio/") else "audio/webm"
+        if ext not in ("webm", "mp3", "ogg", "m4a", "wav"):
+            ext = "webm"
+
+    storage_path = f"chat/{user['id']}/{uuid.uuid4().hex}.{ext}"
+    url = None
+
+    # 1) Supabase Storage
+    try:
+        if storage_enabled():
+            url = await storage_upload(storage_path, data, content_type)
+            print("send_media storage ok:", url[:80] if url else None)
+    except Exception as e:
+        print("send_media storage fail:", e)
+        url = None
+
+    # 2) Locale (fallback – su Render sparisce al redeploy)
+    if not url:
         try:
-            if storage_enabled():
-                url = await storage_upload(storage_path, data, content_type)
-            else:
-                raise RuntimeError("storage off")
-        except Exception as e:
-            print("chat media storage:", e)
             os.makedirs("static/uploads/chat", exist_ok=True)
             path = f"static/uploads/chat/{uuid.uuid4().hex}.{ext}"
             with open(path, "wb") as f:
                 f.write(data)
             url = "/" + path
-    except Exception as e:
-        print("chat media read:", e)
-        cur.close()
-        c.close()
-        return RedirectResponse(f"/chat/{conversation_id}?err=media", 303)
+            print("send_media local:", url)
+        except Exception as e:
+            print("send_media local fail:", e)
 
     if not url:
         cur.close()
         c.close()
         return RedirectResponse(f"/chat/{conversation_id}?err=media", 303)
 
-    media_type = kind if kind in ("image", "video", "audio") else "image"
+    # Testo visibile sempre (se media_url colonna manca, resta almeno questo)
+    labels = {"image": "📷 Foto", "video": "🎬 Video", "audio": "🎤 Audio"}
+    body = caption if caption else labels.get(kind, "📎 Media")
+    # includi URL nel testo come backup leggibile
+    body_with_url = f"{body}\n{url}"
+
+    inserted = False
+    # Prova con colonne media
     try:
         if ttl > 0:
             cur.execute(
-                """INSERT INTO messages (conversation_id,sender_id,tipo,contenuto,media_url,media_type,expires_at)
-                   VALUES (%s,%s,%s,%s,%s,%s, NOW() + (%s || ' seconds')::interval)""",
-                (conversation_id, user["id"], media_type, caption or None, url, media_type, str(ttl)),
+                """INSERT INTO messages (conversation_id, sender_id, tipo, contenuto, media_url, media_type, expires_at)
+                   VALUES (%s,%s,%s,%s,%s,%s, NOW() + make_interval(secs => %s))
+                   RETURNING id""",
+                (conversation_id, user["id"], kind, body, url, kind, ttl),
             )
         else:
             cur.execute(
-                """INSERT INTO messages (conversation_id,sender_id,tipo,contenuto,media_url,media_type)
-                   VALUES (%s,%s,%s,%s,%s,%s)""",
-                (conversation_id, user["id"], media_type, caption or None, url, media_type),
+                """INSERT INTO messages (conversation_id, sender_id, tipo, contenuto, media_url, media_type)
+                   VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
+                (conversation_id, user["id"], kind, body, url, kind),
             )
+        row = cur.fetchone()
+        inserted = bool(row)
+        print("send_media insert media cols ok id=", row)
     except Exception as e:
-        print("insert media msg:", e)
-        c.rollback()
+        print("send_media insert media cols fail:", e)
+        try:
+            c.rollback()
+        except Exception:
+            pass
+
+    if not inserted:
         try:
             cur.execute(
-                "INSERT INTO messages (conversation_id,sender_id,tipo,contenuto) VALUES (%s,%s,%s,%s)",
-                (conversation_id, user["id"], media_type, (caption or url)[:500]),
+                """INSERT INTO messages (conversation_id, sender_id, tipo, contenuto)
+                   VALUES (%s,%s,%s,%s) RETURNING id""",
+                (conversation_id, user["id"], kind, body_with_url[:2000]),
             )
+            row = cur.fetchone()
+            inserted = bool(row)
+            print("send_media insert text fallback id=", row)
         except Exception as e2:
-            print("insert media fallback:", e2)
-            c.rollback()
+            print("send_media insert total fail:", e2)
+            try:
+                c.rollback()
+            except Exception:
+                pass
             cur.close()
             c.close()
-            return RedirectResponse(f"/chat/{conversation_id}?err=media", 303)
+            return RedirectResponse(f"/chat/{conversation_id}?err=db", 303)
 
     try:
         cur.execute("UPDATE conversations SET ultimo_messaggio_at=CURRENT_TIMESTAMP WHERE id=%s", (conversation_id,))
     except Exception:
-        pass
+        try:
+            c.rollback()
+        except Exception:
+            pass
+
     altro_id = conv["user2_id"] if user["id"] == conv["user1_id"] else conv["user1_id"]
     try:
         cur.execute(
             "INSERT INTO notifications (user_id,tipo,titolo,contenuto,related_id) VALUES (%s,'nuovo_messaggio',%s,%s,%s)",
-            (altro_id, f"Media da {user.get('nome') or 'utente'}", media_type, conversation_id),
+            (altro_id, f"{labels.get(kind,'Media')} da {user.get('nome') or 'utente'}", body[:80], conversation_id),
         )
     except Exception:
-        pass
-    c.commit()
+        try:
+            c.rollback()
+        except Exception:
+            pass
+
+    try:
+        c.commit()
+    except Exception as e:
+        print("send_media commit:", e)
+        c.rollback()
+
     cur.close()
     c.close()
     try:
-        await manager.send(altro_id, {"type": "nuovo_messaggio", "title": "Nuovo media", "message": media_type, "conversation_id": conversation_id})
+        await manager.send(altro_id, {
+            "type": "nuovo_messaggio",
+            "title": labels.get(kind, "Media"),
+            "message": body[:80],
+            "conversation_id": conversation_id,
+        })
     except Exception:
         pass
     return RedirectResponse(f"/chat/{conversation_id}", 303)

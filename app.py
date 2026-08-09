@@ -845,6 +845,17 @@ async def chat_page(req: Request, conversation_id: int):
             altro["username"] = "user"
 
         # 3) messaggi (query minimali)
+        # elimina messaggi autodistrutti scaduti
+        try:
+            cur.execute("DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at < NOW()")
+            c.commit()
+        except Exception as e:
+            print("delete expired:", e)
+            try:
+                c.rollback()
+            except Exception:
+                pass
+
         rows = []
         try:
             try:
@@ -887,7 +898,6 @@ async def chat_page(req: Request, conversation_id: int):
                         ora = di.strftime("%H:%M")
                     else:
                         s = str(di)
-                        # "2026-08-09 12:30:00" or iso
                         if "T" in s:
                             ora = s.split("T")[1][:5]
                         elif " " in s:
@@ -897,7 +907,15 @@ async def chat_page(req: Request, conversation_id: int):
                 except Exception:
                     ora = ""
             d["ora"] = ora
-            d["data_invio"] = ora
+            exp = d.get("expires_at")
+            if exp is not None:
+                try:
+                    if hasattr(exp, "isoformat"):
+                        d["expires_at"] = exp.isoformat()
+                    else:
+                        d["expires_at"] = str(exp).replace(" ", "T")
+                except Exception:
+                    d["expires_at"] = str(exp)
             messaggi.append(d)
 
         # 4) mark read (optional)
@@ -1003,16 +1021,25 @@ async def send_message(req: Request, conversation_id: int, contenuto: str = Form
         try:
             cur.execute(
                 """INSERT INTO messages (conversation_id,sender_id,tipo,contenuto,expires_at)
-                   VALUES (%s,%s,'testo',%s, NOW() + (%s || ' seconds')::interval)""",
-                (conversation_id, user["id"], contenuto, str(ttl)),
+                   VALUES (%s,%s,'testo',%s, NOW() + make_interval(secs => %s))""",
+                (conversation_id, user["id"], contenuto, ttl),
             )
         except Exception as e:
-            print("insert ttl msg:", e)
-            c.rollback()
-            cur.execute(
-                "INSERT INTO messages (conversation_id,sender_id,tipo,contenuto) VALUES (%s,%s,'testo',%s)",
-                (conversation_id, user["id"], contenuto),
-            )
+            print("insert ttl msg make_interval:", e)
+            try:
+                c.rollback()
+                cur.execute(
+                    """INSERT INTO messages (conversation_id,sender_id,tipo,contenuto,expires_at)
+                       VALUES (%s,%s,'testo',%s, NOW() + (%s * interval '1 second'))""",
+                    (conversation_id, user["id"], contenuto, ttl),
+                )
+            except Exception as e2:
+                print("insert ttl msg fallback:", e2)
+                c.rollback()
+                cur.execute(
+                    "INSERT INTO messages (conversation_id,sender_id,tipo,contenuto) VALUES (%s,%s,'testo',%s)",
+                    (conversation_id, user["id"], contenuto),
+                )
     else:
         cur.execute(
             "INSERT INTO messages (conversation_id,sender_id,tipo,contenuto) VALUES (%s,%s,'testo',%s)",

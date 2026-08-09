@@ -157,7 +157,7 @@
             {% endif %}
           {% endif %}
           <div class="text-[10px] mt-1 opacity-60 text-right flex items-center justify-end gap-1">
-            {% if msg.expires_at %}<span class="text-yellow-300">⏱ autodistr.</span>{% endif %}
+            {% if msg.expires_at %}<span class="text-yellow-300 countdown" data-exp="{{ msg.expires_at }}">⏱ …</span>{% endif %}
             <span>{{ msg.ora or '' }}</span>
           </div>
         </div>
@@ -368,15 +368,30 @@
     }
   });
 
-  // Auto-destroy client timer (UI hide when expired)
+  // Auto-destroy: countdown + hide + optional server delete
+  function fmtLeft(ms) {
+    if (ms <= 0) return '0s';
+    const s = Math.ceil(ms / 1000);
+    if (s < 60) return s + 's';
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    if (m < 60) return m + 'm ' + r + 's';
+    const h = Math.floor(m / 60);
+    return h + 'h ' + (m % 60) + 'm';
+  }
   function checkExpire() {
     const now = Date.now();
     document.querySelectorAll('.msg-row[data-expires]').forEach(el => {
       const exp = el.getAttribute('data-expires');
       if (!exp) return;
-      const t = Date.parse(exp);
-      if (!isNaN(t) && t < now) {
-        el.innerHTML = '<div class="text-xs text-gray-600 italic px-2">Messaggio autodistrutto</div>';
+      let t = Date.parse(exp);
+      if (isNaN(t)) t = Date.parse(exp.replace(' ', 'T'));
+      if (isNaN(t)) return;
+      const left = t - now;
+      const cd = el.querySelector('.countdown');
+      if (cd) cd.textContent = left > 0 ? ('⏱ ' + fmtLeft(left)) : '⏱ 0s';
+      if (left <= 0) {
+        el.innerHTML = '<div class="text-xs text-gray-600 italic px-2">💨 Messaggio autodistrutto</div>';
         el.removeAttribute('data-expires');
       }
     });
